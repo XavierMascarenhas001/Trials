@@ -1138,7 +1138,7 @@ if filtered_df is not None and not filtered_df.empty:
 
              # --- Ensure numeric QCVI
                 if "qcvi" in df_proj.columns:
-                    df_proj["qcvi"] = pd.to_numeric(df_proj["qcvi"], errors="coerce").fillna(0)
+                    df_proj["qcvi"] = pd.to_numeric(df_proj["qcvi"], errors="coerce")
                 else:
                     df_proj["qcvi"] = 0  # default if missing
 
@@ -1216,7 +1216,22 @@ if filtered_df is not None and not filtered_df.empty:
             final_summary = pd.concat([final_summary, pd.DataFrame([total_row])], ignore_index=True)
             final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1)
             ws_summary = writer.book["Summary"]
+            # --- VARIATION TOTALS ROW ---
+            variation_row = {"Project": "Variations"}
 
+            for col_name, keys in breakdown_columns.items():
+                df_var = export_df[export_df["item_norm"].isin(keys)]
+    
+                if "qcvi" in df_var.columns:
+                    variation_row[col_name] = pd.to_numeric(df_var["qcvi"], errors="coerce").fillna(0).sum()
+                else:
+                    variation_row[col_name] = 0
+
+            # append variation row
+            final_summary = pd.concat(
+                [final_summary, pd.DataFrame([variation_row])],
+                ignore_index=True
+            )
 
         # ---- Breakdown sheets per summary column ----
             breakdown_columns = {
@@ -1318,11 +1333,20 @@ if filtered_df is not None and not filtered_df.empty:
                     )
 
                 # DATA ROWS → START ROW 3
+                # Find QCVI column index
+                qcvi_col_idx = None
+                for col_idx, header_cell in enumerate(ws_break[2], start=1):
+                    if header_cell.value == "qcvi":
+                        qcvi_col_idx = col_idx
+                        break
                 for row_idx in range(3, max_row + 1):
                     fill = light_grey_fill if row_idx % 2 == 1 else white_fill
                     for col_idx in range(1, max_col + 1):
                         cell = ws_break.cell(row=row_idx, column=col_idx)
                         cell.fill = fill
+                                # ---- Color QCVI values red ----
+                        if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
+                            cell.font = red_font
                         cell.border = Border(
                             left=thin_side,
                             right=thin_side,
