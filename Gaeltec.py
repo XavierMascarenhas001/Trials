@@ -1237,15 +1237,12 @@ if filtered_df is not None and not filtered_df.empty:
                 df_var = export_df[export_df["item_norm"].isin(keys)]
     
                 if "qcvi" in df_var.columns:
-                    variation_row[col_name] = pd.to_numeric(df_var["qcvi"], errors="coerce").fillna(0).sum()
+                    variation_row[col_name] = df_var["qcvi"].sum()
                 else:
-                    variation_row[col_name] = 0
+                    variation_row[col_name] = ""  # blank instead of NaN
 
             # append variation row
-            final_summary = pd.concat(
-                [final_summary, pd.DataFrame([variation_row])],
-                ignore_index=True
-            )
+            final_summary = pd.concat([final_summary, pd.DataFrame([variation_row])], ignore_index=True)
 
             for col_name, keys in breakdown_columns.items():
                 sheet_name = col_name[:31]  # Excel sheet name max 31 chars
@@ -1274,6 +1271,9 @@ if filtered_df is not None and not filtered_df.empty:
                     # Reorder so QCVI comes after Quantity_used
                     cols.insert(qty_idx + 1, cols.pop(cols.index("qcvi")))
                     df_breakdown = df_breakdown[cols]
+                    # Replace NaN in QCVI with blank
+                if "qcvi" in df_breakdown.columns:
+                    df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else x)
 
                 # Columns to include
                 cols_to_include = [
@@ -1307,6 +1307,12 @@ if filtered_df is not None and not filtered_df.empty:
 
                 ws_break.add_image(img1_b)
                 ws_break.add_image(img2_b)
+                # --- Find QCVI column index
+                qcvi_col_idx = None
+                for col_idx, header_cell in enumerate(ws_break[2], start=1):
+                    if header_cell.value == "qcvi":
+                        qcvi_col_idx = col_idx
+                        break
 
                 # Header style
                 header_font = Font(bold=True, size=16)
