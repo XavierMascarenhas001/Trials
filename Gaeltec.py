@@ -779,10 +779,6 @@ st.markdown("<h1>📊 Data Management Dashboard</h1>", unsafe_allow_html=True)
 
 # -------------------------------
 # --- File Upload & Initial DF ---
-# -------------------------------
-# --- Upload Aggregated Parquet file ---
-# --- Load aggregated Parquet file ---
-# -------------------------------
 # App Header
 # -------------------------------
 st.header("Upload Data Files")
@@ -1214,8 +1210,6 @@ if filtered_df is not None and not filtered_df.empty:
 
             # Append total row
             final_summary = pd.concat([final_summary, pd.DataFrame([total_row])], ignore_index=True)
-            final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1)
-            ws_summary = writer.book["Summary"]
 
         # ---- Breakdown sheets per summary column ----
             breakdown_columns = {
