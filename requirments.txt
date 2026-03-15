@@ -1,0 +1,14 @@
+# dashboard_mapped.py
+# dashboard_mapped.py
+streamlit
+pandas
+plotly
+geopandas
+pydeck
+Pillow
+streamlit-plotly-events
+pyarrow
+openpyxl
+matplotlib
+python-docx
+rapidfuzz
