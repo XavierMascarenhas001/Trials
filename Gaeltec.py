@@ -1310,6 +1310,7 @@ if filtered_df is not None and not filtered_df.empty:
 
                 # Header style
                 header_font = Font(bold=True, size=16)
+                red_font = Font(color="FF0000")  # <-- ADD THIS
                 header_fill = PatternFill(start_color="00CCFF", end_color="00CCFF", fill_type="solid")
                 thin_side = Side(style="thin")
                 medium_side = Side(style="medium")
