@@ -1167,6 +1167,7 @@ if filtered_df is not None and not filtered_df.empty:
 
                 # CV31
                 cv31_total = df_proj[df_proj["item_norm"].isin(cv31_norm)]["Quantity_used"].sum()
+                qcvi_total = df_proj["qcvi"].sum()
         
                 all_poles_set = set(df_proj["pole"].dropna().astype(str).str.strip())
                 erect_poles_set = set(df_proj[df_proj["item_norm"].isin(erect_norm)]["pole"].dropna().astype(str).str.strip())
