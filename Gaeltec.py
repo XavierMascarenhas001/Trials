@@ -1241,8 +1241,14 @@ if filtered_df is not None and not filtered_df.empty:
                 else:
                     variation_row[col_name] = ""  # blank instead of NaN
 
-            # append variation row
-            final_summary = pd.concat([final_summary, pd.DataFrame([variation_row])], ignore_index=True)
+
+            # --- Replace NaN with blank for all numeric columns in summary ---
+            for col in final_summary.columns:
+                final_summary[col] = final_summary[col].apply(lambda x: "" if pd.isna(x) else x)
+
+            # --- Write summary sheet to Excel ---
+            final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1)
+            ws_summary = writer.book["Summary"]
 
             for col_name, keys in breakdown_columns.items():
                 sheet_name = col_name[:31]  # Excel sheet name max 31 chars
