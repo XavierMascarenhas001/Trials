@@ -1231,15 +1231,18 @@ if filtered_df is not None and not filtered_df.empty:
                 df_var = export_df[export_df["item_norm"].isin(keys)]
     
                 if "qcvi" in df_var.columns:
-                    variation_row[col_name] = df_var["qcvi"].sum()
+                    variation_row[col_name] = pd.to_numeric(df_var["qcvi"], errors="coerce").fillna(0).sum()
                 else:
                     variation_row[col_name] = ""  # blank instead of NaN
 
             final_summary = pd.concat([final_summary, pd.DataFrame([variation_row])], ignore_index=True)
-            final_summary = final_summary.fillna("")
+            # Replace any remaining NaN in QCVI with blank for Excel display
+            if "QCVI" in final_summary.columns:
+                final_summary["QCVI"] = final_summary["QCVI"].apply(lambda x: "" if pd.isna(x) else x)
+                        final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1)
+                        ws_summary = writer.book["Summary"]
+                        # --- Replace NaN with blank for all numeric columns in summary ---
             final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1)
-            ws_summary = writer.book["Summary"]
-            # --- Replace NaN with blank for all numeric columns in summary ---
 
 
             for col_name, keys in breakdown_columns.items():
@@ -1348,7 +1351,7 @@ if filtered_df is not None and not filtered_df.empty:
                     fill = light_grey_fill if row_idx % 2 == 1 else white_fill
                     for col_idx in range(1, max_col + 1):
                         cell = ws_break.cell(row=row_idx, column=col_idx)
-                        cell.fill = fill
+                        cell.fill = fillvariation_row[col_name] = df_var["qcvi"].sum()
                                 # ---- Color QCVI values red ----
                         if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
                             cell.font = red_font
