@@ -746,7 +746,7 @@ column_rename_map = {
 }
 
 export_columns = [
-    'Output','comment', 'item', 'Quantity_original','Quantity_used', 'material_code','type', 'pole', 'Date',
+    'Output','comment', 'item', 'Quantity_original','qcvi','Quantity_used', 'material_code','type', 'pole', 'Date',
     'District', 'project', 'Project Manager','location_map', 'Circuit', 'Segment',
     'team lider', 'PID', 'sourcefile'
 ]
@@ -1087,7 +1087,7 @@ if filtered_df is not None and not filtered_df.empty:
             export_df.loc[export_df["done"].isna(), "done"] = "Unplanned"
 
         cols_to_include = [
-            "item","comment", "Quantity_original", "Quantity_used", "material_code",
+            "item","comment", "Quantity_original", "qcvi", "Quantity_used", "material_code",
             "type", "pole", "datetouse_dt", "District", "project",
             "Project Manager","location_map", "Circuit", "Segment",
             "team lider","total", "PID", "sourcefile"
@@ -1135,6 +1135,12 @@ if filtered_df is not None and not filtered_df.empty:
 
             for project, df_proj in export_df.groupby("project"):
                 df_proj = df_proj.copy()
+
+             # --- Ensure numeric QCVI
+                if "qcvi" in df_proj.columns:
+                    df_proj["qcvi"] = pd.to_numeric(df_proj["qcvi"], errors="coerce").fillna(0)
+                else:
+                    df_proj["qcvi"] = 0  # default if missing
 
 
                 # ERECT POLES
@@ -1193,6 +1199,7 @@ if filtered_df is not None and not filtered_df.empty:
                     "CV7 UG": ug_total,
                     "CV7 CB": cb_total,
                     "CV31": cv31_total,
+                    "QCVI": qcvi_total,
                     "Total Value (£)": total_value
                 })
 
@@ -1243,9 +1250,18 @@ if filtered_df is not None and not filtered_df.empty:
                 else:
                     df_breakdown = export_df[export_df["item_norm"].isin(keys)]
 
+
+                # --- QCVI ADDITION: add qcvi column next to Quantity_used
+                if "Quantity_used" in df_breakdown.columns and "qcvi" in df_breakdown.columns:
+                    cols = df_breakdown.columns.tolist()
+                    qty_idx = cols.index("Quantity_used")
+                    # Reorder so QCVI comes after Quantity_used
+                    cols.insert(qty_idx + 1, cols.pop(cols.index("qcvi")))
+                    df_breakdown = df_breakdown[cols]
+
                 # Columns to include
                 cols_to_include = [
-                    "item","comment","Quantity_used","material_code","pole","datetouse_dt","done_display",
+                    "item","comment","Quantity_used","qcvi","material_code","pole","datetouse_dt","done_display",
                     "District", "project","Project Manager","location_map","Circuit","Segment","sourcefile"
                 ]
                 cols_to_include = [c for c in cols_to_include if c in df_breakdown.columns]
