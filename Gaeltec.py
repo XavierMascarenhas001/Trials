@@ -1216,6 +1216,20 @@ if filtered_df is not None and not filtered_df.empty:
             final_summary = pd.concat([final_summary, pd.DataFrame([total_row])], ignore_index=True)
             final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1)
             ws_summary = writer.book["Summary"]
+
+        # ---- Breakdown sheets per summary column ----
+            breakdown_columns = {
+                "CV7_erect": erect_norm,
+                "CV7_erect_lv": erect_norm_lv,
+                "CV7_recover": recover_norm,
+                "CV8": cv8_norm,  # Special logic
+                "CV7 TX": tx_norm,
+                "CV7 HV Conductor": conductor_hv_norm,
+                "CV7 LV Conductor": conductor_lv_norm,
+                "CV7 Switchgear": switchgear_norm,
+                "CV7 UG": ug_norm,
+                "CV31": cv31_norm,
+            }
             # --- VARIATION TOTALS ROW ---
             variation_row = {"Project": "Variations"}
 
@@ -1232,20 +1246,6 @@ if filtered_df is not None and not filtered_df.empty:
                 [final_summary, pd.DataFrame([variation_row])],
                 ignore_index=True
             )
-
-        # ---- Breakdown sheets per summary column ----
-            breakdown_columns = {
-                "CV7_erect": erect_norm,
-                "CV7_erect_lv": erect_norm_lv,
-                "CV7_recover": recover_norm,
-                "CV8": cv8_norm,  # Special logic
-                "CV7 TX": tx_norm,
-                "CV7 HV Conductor": conductor_hv_norm,
-                "CV7 LV Conductor": conductor_lv_norm,
-                "CV7 Switchgear": switchgear_norm,
-                "CV7 UG": ug_norm,
-                "CV31": cv31_norm,
-            }
 
             for col_name, keys in breakdown_columns.items():
                 sheet_name = col_name[:31]  # Excel sheet name max 31 chars
