@@ -1117,7 +1117,7 @@ if filtered_df is not None and not filtered_df.empty:
                 "CV7_erect_lv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_erect_lv.keys()])]["Quantity_used"].sum(),
                 "CV7 Recover": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_recover.keys()])]["Quantity_used"].sum(),
                 "CV8": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV8.keys()])]["Quantity_used"].sum(),
-                "CV7 TX": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_Tx.keys()])]["Quantity_used"].sum(),
+                "CV7_TX": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_Tx.keys()])]["Quantity_used"].sum(),
                 "Conductor_hv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_OHL_CONDUCTOR.keys()])]["Quantity_used"].sum(),
                 "Conductor_lv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_OHL_CONDUCTOR_LV.keys()])]["Quantity_used"].sum(),
                 "switchgear_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_SWITCHGEAR.keys()])]["Quantity_used"].sum(),
