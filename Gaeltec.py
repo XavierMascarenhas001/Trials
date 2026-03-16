@@ -1091,10 +1091,8 @@ if filtered_df is not None and not filtered_df.empty:
 
         # Ensure QCVI is string for Excel
         if "qcvi" in export_df.columns:
-            export_df["qcvi"] = export_df["qcvi"].apply(
-                lambda x: "" if pd.isna(x) else str(int(x)) if pd.api.types.is_number(x) else str(x)
-            )
-
+            export_df["qcvi"] = pd.to_numeric(export_df["qcvi"], errors="coerce").fillna(0)
+            export_df["qcvi"] = export_df["qcvi"].apply(lambda x: "" if x == 0 else str(int(x)))
         # ---- Output sheet ----
         export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1, na_rep="")
         ws_output = writer.sheets["Output"]
@@ -1158,7 +1156,8 @@ if filtered_df is not None and not filtered_df.empty:
                 df_breakdown = export_df[export_df["item_norm"].isin([normalize_item(k) for k in keys])].copy()
 
             if "qcvi" in df_breakdown.columns:
-                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(x))
+                df_breakdown["qcvi"] = pd.to_numeric(df_breakdown["qcvi"], errors="coerce").fillna(0)
+                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if x == 0 else str(int(x))
 
             cols_to_include_sheet = [
                 "item","comment","Quantity_used","qcvi","material_code","pole","datetouse_dt","done_display",
