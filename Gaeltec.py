@@ -1487,6 +1487,14 @@ with col_full:
             st.info(f"No data found for {cat_name}")
             continue
 
+        if 'qvci' in sub_df.columns:
+            sub_df['qvci_clean'] = pd.to_numeric(
+                sub_df['qvci'].astype(str).str.replace(" ", "").str.replace(",", ".", regex=False),
+                errors='coerce'
+            ).fillna(0)
+        else:
+            sub_df['qvci_clean'] = 0
+
         # --- Apply multipliers ---
         sub_df["multiplier"] = 1
         sub_df.loc[sub_df["item"].isin(erect_h_items), "multiplier"] = 2
@@ -1499,11 +1507,18 @@ with col_full:
                 errors='coerce'
             )
             sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
+
+    # 🔹 NEW AGGREGATION INCLUDING VARIATION
+            bar_data = sub_df.groupby('mapped').agg(Total=('adj_value','sum'),Variation=('qvci_clean','sum')).reset_index()
             bar_data = sub_df.groupby('mapped')['adj_value'].sum().reset_index()
             bar_data.columns = ['Mapped', 'Total']
         else:
             bar_data = sub_df['mapped'].value_counts().reset_index()
             bar_data.columns = ['Mapped', 'Total']
+            bar_data['Variation'] = 0
+            
+        bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
+        bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
 
         # Divide Conductors_2 by 1000
         if cat_name == "Conductors_2":
@@ -1528,31 +1543,36 @@ with col_full:
         # Draw the bar chart
         # FIX: Use go.Figure with explicit data types
         fig = go.Figure(data=[
-            go.Bar(
-                x=bar_data['Mapped'].astype(str).tolist(),
-                y=bar_data['Total'].astype(float).tolist(),
-                text=bar_data['Total'].astype(float).tolist(),
-                texttemplate='%{y:,.1f}',
-                textposition='outside'
-            )
-        ])
-
+        fig.add_bar(
+            x=bar_data['Mapped'],
+            y=bar_data['Total'],
+            name="Quantity",
+            marker_color="#4C78A8",
+            text=bar_data['Total'],
+            texttemplate='%{y:,.1f}',
+            textposition='outside'
+        )
+        fig.add_bar(
+            x=bar_data['Mapped'],
+            y=bar_data['PositiveVar'],
+            name="Positive Variation",
+            marker_color="green"
+        )
+        fig.add_bar(
+            x=bar_data['Mapped'],
+            y=bar_data['NegativeVar'],
+            name="Negative Variation",
+            marker_color="red"
+        )
         fig.update_layout(
+            barmode='relative',
             title=f"{cat_name} Overview",
             xaxis_title="Mapping",
-            yaxis_title=y_axis_label
-        )
-        
-        # Add background colors separately
-        fig.update_layout(
+            yaxis_title=y_axis_label,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            yaxis=dict(
-                gridcolor='rgba(255,255,255,0.3)'  # Semi-transparent white grid
-            )
+            yaxis=dict(gridcolor='rgba(255,255,255,0.3)')
         )
-
-        # Display the chart
         st.plotly_chart(fig, use_container_width=True, height=500)
 
         # COLLAPSIBLE BUTTONS SECTION
@@ -1622,7 +1642,7 @@ with col_full:
             # 🔥 RENAME FOR DISPLAY
             selected_rows = selected_rows.rename(columns=column_rename_map)
 
-            display_cols = ['Output','Quantity','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
+            display_cols = ['Output','Quantity','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
             display_cols = [c for c in display_cols if c in selected_rows.columns]
         
 
@@ -1651,7 +1671,7 @@ with col_full:
                     # 🔥 Rename columns BEFORE selecting
                     df_bar = df_bar.rename(columns=column_rename_map)
 
-                    cols_to_include = ['Output','Quantity','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
+                    cols_to_include = ['Output','Quantity','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
                     cols_to_include = [c for c in cols_to_include if c in df_bar.columns]
                     df_bar = df_bar[cols_to_include]
 
