@@ -1118,6 +1118,12 @@ if filtered_df is not None and not filtered_df.empty:
                 "CV7 Recover": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_recover.keys()])]["Quantity_used"].sum(),
                 "CV8": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV8.keys()])]["Quantity_used"].sum(),
                 "CV7 TX": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_Tx.keys()])]["Quantity_used"].sum(),
+                "Conductor_hv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_OHL_CONDUCTOR.keys()])]["Quantity_used"].sum(),
+                "Conductor_lv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_OHL_CONDUCTOR_LV.keys()])]["Quantity_used"].sum(),
+                "switchgear_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_SWITCHGEAR.keys()])]["Quantity_used"].sum(),
+                "ug_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_UG.keys()])]["Quantity_used"].sum(),
+                "cb_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_CB.keys()])]["Quantity_used"].sum(),
+                "cv31_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV31.keys()])]["Quantity_used"].sum(),
                 "QCVI": "" if df_proj["qcvi"].sum() == 0 else str(int(df_proj["qcvi"].sum())),
                 "Total Value (£)": df_proj.get("total", pd.Series([0])).sum()
             })
@@ -1141,6 +1147,12 @@ if filtered_df is not None and not filtered_df.empty:
             "CV7_recover": CV7_recover.keys(),
             "CV8": CV8.keys(),
             "CV7 TX": CV7_Tx.keys()
+            "Conductor_hv": CV7_OHL_CONDUCTOR.keys()
+            "Conductor_lv": CV7_OHL_CONDUCTOR_LV.keys()
+            "switchgear_norm": CV7_SWITCHGEAR.keys()
+            "ug_norm": CV7_UG.keys()
+            "cb_norm": CV7_CB.keys()
+            "cv31_norm": CV31.keys()
         }
 
         for col_name, keys in breakdown_columns.items():
