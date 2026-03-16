@@ -1186,6 +1186,8 @@ if filtered_df is not None and not filtered_df.empty:
         light_grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
         white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         red_font = Font(color="FF0000")
+        green_font = Font(color="00AA00") # green
+
 
         for ws in writer.sheets.values():
             ws.row_dimensions[1].height = 90  # logo row
