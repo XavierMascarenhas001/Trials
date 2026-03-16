@@ -1146,8 +1146,8 @@ if filtered_df is not None and not filtered_df.empty:
         }
 
         for col_name, keys in breakdown_columns.items():
-            # Special logic for Poles Refurb
-            if col_name == "CV8":  # Example for your Poles Refurb logic
+            # Poles Refurb special logic for CV8
+            if col_name == "CV8":
                 all_poles = set(export_df["pole"].dropna().astype(str).str.strip())
                 erect_poles = set(export_df[export_df["item_norm"].isin([normalize_item(i) for i in CV7_erect.keys()])]["pole"].dropna().astype(str).str.strip())
                 recover_poles = set(export_df[export_df["item_norm"].isin([normalize_item(i) for i in CV7_recover.keys()])]["pole"].dropna().astype(str).str.strip())
@@ -1160,7 +1160,6 @@ if filtered_df is not None and not filtered_df.empty:
             if "qcvi" in df_breakdown.columns:
                 df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(x))
 
-            # Columns to include
             cols_to_include_sheet = [
                 "item","comment","Quantity_used","qcvi","material_code","pole","datetouse_dt","done_display",
                 "District","project","Project Manager","location_map","Circuit","Segment","sourcefile"
@@ -1170,82 +1169,16 @@ if filtered_df is not None and not filtered_df.empty:
 
             sheet_name_safe = col_name[:31]
             df_breakdown.to_excel(writer, sheet_name=sheet_name_safe, index=False, startrow=1, na_rep="")
-            ws_break = writer.sheets[sheet_name_safe]
 
-            # ---- Formatting (headers, logos, etc.) ----
-            ws_break.row_dimensions[1].height = 90  # logo row
-            # Logos
-            img1_b = XLImage("Images/GaeltecImage.png")
-            img2_b = XLImage("Images/SPEN.png")
-            IMG_HEIGHT = 120
-            IMG_WIDTH_SMALL = 120
-            IMG_WIDTH_LARGE = IMG_WIDTH_SMALL * 3
+        # ---- Formatting & logos (after all sheets written) ----
+        from openpyxl.drawing.image import Image as XLImage
+        from openpyxl.styles import Font, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
 
-            img1_b.width = IMG_WIDTH_SMALL
-            img1_b.height = IMG_HEIGHT
-            img1_b.anchor = "B1"
+        IMG_HEIGHT = 120
+        IMG_WIDTH_SMALL = 120
+        IMG_WIDTH_LARGE = IMG_WIDTH_SMALL * 3
 
-            img2_b.width = IMG_WIDTH_LARGE
-            img2_b.height = IMG_HEIGHT
-            img2_b.anchor = "A1"
-
-            ws_break.add_image(img1_b)
-            ws_break.add_image(img2_b)
-            # --- Find QCVI column index
-            qcvi_col_idx = None
-            for col_idx, header_cell in enumerate(ws_break[2], start=1):
-                if header_cell.value == "qcvi":
-                    qcvi_col_idx = col_idx
-                    break
-
-            # Header style
-            header_font = Font(bold=True, size=16)
-            red_font = Font(color="FF0000")  # <-- ADD THIS
-            header_fill = PatternFill(start_color="00CCFF", end_color="00CCFF", fill_type="solid")
-            thin_side = Side(style="thin")
-            medium_side = Side(style="medium")
-            thick_side = Side(style="thick")
-            light_grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-            white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-
-            max_col = ws_break.max_column
-            max_row = ws_break.max_row
-
-            # HEADER → ROW 2
-            for col_idx, cell in enumerate(ws_break[2], start=1):
-                cell.font = header_font
-                cell.fill = header_fill
-                ws_break.column_dimensions[get_column_letter(col_idx)].width = 60 if col_idx == 1 else 20
-                cell.border = Border(
-                    left=thick_side if col_idx == 1 else medium_side,
-                    right=thick_side if col_idx == max_col else medium_side,
-                    top=thick_side,
-                    bottom=thick_side
-                )
-
-            # DATA ROWS → START ROW 3
-            # Find QCVI column index
-            qcvi_col_idx = None
-            for col_idx, header_cell in enumerate(ws_break[2], start=1):
-                if header_cell.value == "qcvi":
-                    qcvi_col_idx = col_idx
-                    break
-            for row_idx in range(3, max_row + 1):
-                fill = light_grey_fill if row_idx % 2 == 1 else white_fill
-                for col_idx in range(1, max_col + 1):
-                    cell = ws_break.cell(row=row_idx, column=col_idx)
-                    cell.fill = fill
-                        # ---- Color QCVI values red ----
-                    if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
-                        cell.font = red_font
-                    cell.border = Border(
-                        left=thin_side,
-                        right=thin_side,
-                        top=thin_side,
-                        bottom=thin_side
-                    )
-                        
-        # ---- Formatting styles ----
         header_font = Font(bold=True, size=16)
         header_fill = PatternFill(start_color="00CCFF", end_color="00CCFF", fill_type="solid")
         thin_side = Side(style="thin")
@@ -1253,58 +1186,31 @@ if filtered_df is not None and not filtered_df.empty:
         thick_side = Side(style="thick")
         light_grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
         white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        red_font = Font(color="FF0000")
 
-        # AFTER ✅
-        for sheet in [ws, ws_summary]:
-            sheet.row_dimensions[1].height = 90   # logo row
+        for ws in writer.sheets.values():
+            ws.row_dimensions[1].height = 90  # logo row
 
-        # ---- Load & resize images ----
-        IMG_HEIGHT = 120
-        IMG_WIDTH_SMALL = 120
-        IMG_WIDTH_LARGE = IMG_WIDTH_SMALL * 3  # 🔹 3× wider
+            # Add images
+            img1 = XLImage("Images/GaeltecImage.png")
+            img1.width = IMG_WIDTH_SMALL
+            img1.height = IMG_HEIGHT
+            img1.anchor = "B1"
 
-        img1 = XLImage("Images/GaeltecImage.png")
-        img2 = XLImage("Images/SPEN.png")
+            img2 = XLImage("Images/SPEN.png")
+            img2.width = IMG_WIDTH_LARGE
+            img2.height = IMG_HEIGHT
+            img2.anchor = "A1"
 
-        img1.width = IMG_WIDTH_SMALL
-        img1.height = IMG_HEIGHT
+            ws.add_image(img1)
+            ws.add_image(img2)
 
-        img2.width = IMG_WIDTH_LARGE
-        img2.height = IMG_HEIGHT
-
-        # Position images (row 1)
-        img1.anchor = "B1"
-        img2.anchor = "A1"
-
-        ws.add_image(img1)
-        ws.add_image(img2)
-
-        # Same for Summary
-        img1_s = XLImage("Images/GaeltecImage.png")
-        img2_s = XLImage("Images/SPEN.png")
-
-        img1_s.width = IMG_WIDTH_SMALL
-        img1_s.height = IMG_HEIGHT
-        img1_s.anchor = "A1"
-
-        img2_s.width = IMG_WIDTH_LARGE
-        img2_s.height = IMG_HEIGHT
-        img2_s.anchor = "B1"
-
-        ws_summary.add_image(img1_s)
-        ws_summary.add_image(img2_s)
-
-
-        # ---- Formatting (unchanged style) ----
-        for sheet in [ws, ws_summary]:
-            max_col = sheet.max_column
-            max_row = sheet.max_row
-
-            # HEADER → ROW 2 ✅
-            for col_idx, cell in enumerate(sheet[2], start=1):
+            # Format header row 2
+            max_col = ws.max_column
+            for col_idx, cell in enumerate(ws[2], start=1):
                 cell.font = header_font
                 cell.fill = header_fill
-                sheet.column_dimensions[get_column_letter(col_idx)].width = 60 if col_idx == 1 else 20
+                ws.column_dimensions[get_column_letter(col_idx)].width = 60 if col_idx == 1 else 20
                 cell.border = Border(
                     left=thick_side if col_idx == 1 else medium_side,
                     right=thick_side if col_idx == max_col else medium_side,
@@ -1312,18 +1218,21 @@ if filtered_df is not None and not filtered_df.empty:
                     bottom=thick_side
                 )
 
-            # DATA ROWS → START ROW 3 ✅
-            for row_idx in range(3, max_row + 1):
+            # Format data rows
+            qcvi_col_idx = None
+            for col_idx, header_cell in enumerate(ws[2], start=1):
+                if header_cell.value == "qcvi":
+                    qcvi_col_idx = col_idx
+                    break
+
+            for row_idx in range(3, ws.max_row + 1):
                 fill = light_grey_fill if row_idx % 2 == 1 else white_fill
-                for col_idx in range(1, max_col + 1):
-                    cell = sheet.cell(row=row_idx, column=col_idx)
+                for col_idx in range(1, ws.max_column + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
                     cell.fill = fill
-                    cell.border = Border(
-                        left=thin_side,
-                        right=thin_side,
-                        top=thin_side,
-                        bottom=thin_side
-                    )
+                    cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+                    if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
+                        cell.font = red_font
 
     # ---- Download button ----
     buffer_agg.seek(0)
