@@ -1146,7 +1146,7 @@ if filtered_df is not None and not filtered_df.empty:
             "CV7_erect_lv": CV7_erect_lv.keys(),
             "CV7_recover": CV7_recover.keys(),
             "CV8": CV8.keys(),
-            "CV7 TX": CV7_Tx.keys()
+            "CV7_TX": CV7_Tx.keys()
             "Conductor_hv": CV7_OHL_CONDUCTOR.keys()
             "Conductor_lv": CV7_OHL_CONDUCTOR_LV.keys()
             "switchgear_norm": CV7_SWITCHGEAR.keys()
