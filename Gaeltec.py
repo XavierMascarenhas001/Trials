@@ -1124,8 +1124,8 @@ if filtered_df is not None and not filtered_df.empty:
                 "ug_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_UG.keys()])]["Quantity_used"].sum(),
                 "cb_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_CB.keys()])]["Quantity_used"].sum(),
                 "cv31_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV31.keys()])]["Quantity_used"].sum(),
-                "QCVI": "" if df_proj["qcvi"].sum() == 0 else str(int(df_proj["qcvi"].sum())),
                 "Total Value (£)": df_proj.get("total", pd.Series([0])).sum()
+                "QCVI": df_proj["qcvi"].sum()
             })
 
         final_summary = pd.DataFrame(summary_rows).sort_values("Project")
@@ -1134,8 +1134,10 @@ if filtered_df is not None and not filtered_df.empty:
         if not final_summary.empty:
             total_row = final_summary.select_dtypes(include="number").sum().to_dict()
             total_row["Project"] = "Total"
-            total_row["QCVI"] = ""
+            total_row["QCVI"] = final_summary["QCVI"].sum()  # preserve QCVI
             final_summary = pd.concat([final_summary, pd.DataFrame([total_row])], ignore_index=True)
+
+        qcvi_series = final_summary.pop("QCVI")  # remove QCVI column
 
         final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1, na_rep="")
         ws_summary = writer.sheets["Summary"]
