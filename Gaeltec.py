@@ -1092,6 +1092,10 @@ if filtered_df is not None and not filtered_df.empty:
         export_df = export_df[cols_to_include]
 
         # ---- Output sheet (start below images) ----
+        # Replace NaN in qcvi with blank
+        if "qcvi" in export_df.columns:
+            export_df["qcvi"] = export_df["qcvi"].fillna("")
+
         export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1)
         ws = writer.book["Output"]
 
