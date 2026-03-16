@@ -1661,7 +1661,7 @@ with col_full:
             # 🔥 RENAME FOR DISPLAY
             selected_rows = selected_rows.rename(columns=column_rename_map)
 
-            display_cols = ['Output','Quantity','Variation','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
+            display_cols = ['Output','Quantity','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
             display_cols = [c for c in display_cols if c in selected_rows.columns]
         
 
@@ -1690,7 +1690,7 @@ with col_full:
                     # 🔥 Rename columns BEFORE selecting
                     df_bar = df_bar.rename(columns=column_rename_map)
 
-                    cols_to_include = ['Output','Quantity','Variation','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
+                    cols_to_include = ['Output','Quantity','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
                     cols_to_include = [c for c in cols_to_include if c in df_bar.columns]
                     df_bar = df_bar[cols_to_include]
 
