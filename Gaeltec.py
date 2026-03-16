@@ -1511,7 +1511,7 @@ with col_full:
     # 🔹 NEW AGGREGATION INCLUDING VARIATION
             bar_data = sub_df.groupby('mapped').agg(Total=('adj_value','sum'),Variation=('qvci_clean','sum')).reset_index()
             bar_data = sub_df.groupby('mapped')['adj_value'].sum().reset_index()
-            bar_data.columns = ['Mapped', 'Total']
+            bar_data.columns = ['Mapped', 'Total','Variation']
         else:
             bar_data = sub_df['mapped'].value_counts().reset_index()
             bar_data.columns = ['Mapped', 'Total']
