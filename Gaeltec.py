@@ -1661,7 +1661,7 @@ with col_full:
             # 🔥 RENAME FOR DISPLAY
             selected_rows = selected_rows.rename(columns=column_rename_map)
 
-            display_cols = ['Output','Quantity','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
+            display_cols = ['Output','Quantity_original','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
             display_cols = [c for c in display_cols if c in selected_rows.columns]
         
 
@@ -1688,9 +1688,18 @@ with col_full:
                         df_bar.loc[df_bar['datetouse'].isna(), 'datetouse_display'] = "Unplanned"
 
                     # 🔥 Rename columns BEFORE selecting
-                    df_bar = df_bar.rename(columns=column_rename_map)
+                    if 'qvci' in df_bar.columns:
+                        df_bar['qvci'] = pd.to_numeric(df_bar['qvci'], errors='coerce').fillna(0)
+                    else:
+                        df_bar['qvci'] = 0
 
-                    cols_to_include = ['Output','Quantity','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
+                    if 'qty' in df_bar.columns:
+                        df_bar['Quantity_original'] = pd.to_numeric(df_bar['qty'], errors='coerce').fillna(0)
+                    else:
+                        df_bar['Quantity_original'] = 0
+
+                    df_bar = df_bar.rename(columns=column_rename_map)
+                    cols_to_include = ['Output','Quantity_original','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
                     cols_to_include = [c for c in cols_to_include if c in df_bar.columns]
                     df_bar = df_bar[cols_to_include]
 
@@ -1786,7 +1795,7 @@ with col_full:
                         )
                         df_bar.loc[df_bar['datetouse'].isna(), 'datetouse_display'] = "Unplanned"
 
-                    cols_to_include = ['mapped', 'datetouse_display','qsub'] + extra_cols
+                    cols_to_include = ['mapped', 'datetouse_display', 'qsub', 'qty', 'qvci'] + extra_cols
                     cols_to_include = [c for c in cols_to_include if c in df_bar.columns]
                     df_bar = df_bar[cols_to_include]
 
