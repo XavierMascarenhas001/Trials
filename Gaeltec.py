@@ -1081,7 +1081,7 @@ if filtered_df is not None and not filtered_df.empty:
             export_df["done_display"] = export_df["done"].dt.strftime("%d/%m/%Y")
             export_df.loc[export_df["done"].isna(), "done_display"] = "Unplanned"
 
-        # ---- Keep only needed columns ----
+        # Keep only relevant columns
         cols_to_include = [
             "item","comment","Quantity_original","qcvi","Quantity_used","material_code",
             "type","pole","datetouse_dt","District","project","Project Manager",
@@ -1089,9 +1089,11 @@ if filtered_df is not None and not filtered_df.empty:
         ]
         export_df = export_df[[c for c in cols_to_include if c in export_df.columns]]
 
-        # ---- Ensure QCVI is string ----
+        # Ensure QCVI is string for Excel
         if "qcvi" in export_df.columns:
-            export_df["qcvi"] = export_df["qcvi"].apply(lambda x: "" if pd.isna(x) else str(int(x)) if pd.api.types.is_number(x) else str(x))
+            export_df["qcvi"] = export_df["qcvi"].apply(
+                lambda x: "" if pd.isna(x) else str(int(x)) if pd.api.types.is_number(x) else str(x)
+            )
 
         # ---- Output sheet ----
         export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1, na_rep="")
@@ -1106,6 +1108,7 @@ if filtered_df is not None and not filtered_df.empty:
         h_recover_mask = export_df["item"].str.contains("Recover 'A' / 'H' pole, up", case=False, na=False)
         export_df.loc[h_mask | h_recover_mask, "Quantity_used"] *= 2
 
+        # Build summary per project
         summary_rows = []
         for project, df_proj in export_df.groupby("project"):
             df_proj = df_proj.copy()
@@ -1122,6 +1125,7 @@ if filtered_df is not None and not filtered_df.empty:
             })
 
         final_summary = pd.DataFrame(summary_rows).sort_values("Project")
+
         # Add total row
         if not final_summary.empty:
             total_row = final_summary.select_dtypes(include="number").sum().to_dict()
@@ -1142,62 +1146,35 @@ if filtered_df is not None and not filtered_df.empty:
         }
 
         for col_name, keys in breakdown_columns.items():
-            df_breakdown = export_df[export_df["item_norm"].isin([normalize_item(k) for k in keys])].copy()
-            if df_breakdown.empty:
-                df_breakdown = pd.DataFrame({c: [] for c in cols_to_include})
+            # Special logic for Poles Refurb
+            if col_name == "CV8":  # Example for your Poles Refurb logic
+                all_poles = set(export_df["pole"].dropna().astype(str).str.strip())
+                erect_poles = set(export_df[export_df["item_norm"].isin([normalize_item(i) for i in CV7_erect.keys()])]["pole"].dropna().astype(str).str.strip())
+                recover_poles = set(export_df[export_df["item_norm"].isin([normalize_item(i) for i in CV7_recover.keys()])]["pole"].dropna().astype(str).str.strip())
+                candidate_poles = all_poles - erect_poles - recover_poles
+                df_breakdown = export_df[export_df["pole"].astype(str).str.strip().isin(candidate_poles)]
+                df_breakdown = df_breakdown[df_breakdown["item_norm"].isin([normalize_item(k) for k in keys])]
+            else:
+                df_breakdown = export_df[export_df["item_norm"].isin([normalize_item(k) for k in keys])].copy()
 
             if "qcvi" in df_breakdown.columns:
-                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(int(x)) if pd.api.types.is_number(x) else str(x))
+                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(x))
 
-            sheet_name = col_name[:31]
-            df_breakdown.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1, na_rep="")
-                
+            # Columns to include
+            cols_to_include_sheet = [
+                "item","comment","Quantity_used","qcvi","material_code","pole","datetouse_dt","done_display",
+                "District","project","Project Manager","location_map","Circuit","Segment","sourcefile"
+            ]
+            cols_to_include_sheet = [c for c in cols_to_include_sheet if c in df_breakdown.columns]
+            df_breakdown = df_breakdown[cols_to_include_sheet]
 
-            for col_name, keys in breakdown_columns.items():
-                sheet_name = col_name[:31]  # Excel sheet name max 31 chars
+            sheet_name_safe = col_name[:31]
+            df_breakdown.to_excel(writer, sheet_name=sheet_name_safe, index=False, startrow=1, na_rep="")
+            ws_break = writer.sheets[sheet_name_safe]
 
-                if col_name == "Poles Refurb":
-                    # Poles NOT in Erect or Recover
-                    all_poles_set = set(export_df["pole"].dropna().astype(str).str.strip())
-                    erect_poles_set = set(export_df[export_df["item_norm"].isin(erect_norm)]["pole"].dropna().astype(str).str.strip())
-                    recover_poles_set = set(export_df[export_df["item_norm"].isin(recover_norm)]["pole"].dropna().astype(str).str.strip())
-                    candidate_poles = all_poles_set - erect_poles_set - recover_poles_set
-                    # Step 3: Filter rows for candidate poles
-                    df_candidate = export_df[export_df["pole"].astype(str).str.strip().isin(candidate_poles)]
-                    # Step 4: Only keep rows that are in CV8
-                    df_candidate_cv8 = df_candidate[df_candidate["item_norm"].isin(cv8_norm)]
-                    cv31_poles = set(df_candidate[df_candidate["item_norm"].isin(cv31_norm)]["pole"].dropna().astype(str).str.strip())
-                    # Step 5: Exclude any pole that has a CV31-exclusive item
-                    df_breakdown = df_candidate_cv8[~df_candidate_cv8["pole"].astype(str).str.strip().isin(cv31_poles)]
-                else:
-                    df_breakdown = export_df[export_df["item_norm"].isin(keys)]
+            # ---- Formatting (headers, logos, etc.) ----
+            ws_break.row_dimensions[1].height = 90  # logo row
 
-
-                # --- QCVI ADDITION: add qcvi column next to Quantity_used
-                if "Quantity_used" in df_breakdown.columns and "qcvi" in df_breakdown.columns:
-                    cols = df_breakdown.columns.tolist()
-                    qty_idx = cols.index("Quantity_used")
-                    # Reorder so QCVI comes after Quantity_used
-                    cols.insert(qty_idx + 1, cols.pop(cols.index("qcvi")))
-                    df_breakdown = df_breakdown[cols]
-                    # Replace NaN in QCVI with blank
-                if "qcvi" in df_breakdown.columns:
-                    df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(x))
-                df_breakdown.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1, na_rep="")
-
-                # Columns to include
-                cols_to_include = [
-                    "item","comment","Quantity_used","qcvi","material_code","pole","datetouse_dt","done_display",
-                    "District", "project","Project Manager","location_map","Circuit","Segment","sourcefile"
-                ]
-                cols_to_include = [c for c in cols_to_include if c in df_breakdown.columns]
-                df_breakdown = df_breakdown[cols_to_include]
-
-                # Write sheet
-                ws_break = writer.book[sheet_name]
-
-                # ---- Formatting ----
-                ws_break.row_dimensions[1].height = 90  # logo row
 
                 # Logos
                 img1_b = XLImage("Images/GaeltecImage.png")
