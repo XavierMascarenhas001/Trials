@@ -1526,6 +1526,9 @@ with col_full:
             bar_data = sub_df['mapped'].value_counts().reset_index()
             bar_data.columns = ['Mapped', 'Total']
             bar_data['Variation'] = 0
+
+        if 'Variation' not in bar_data.columns:
+            bar_data['Variation'] = 0
             
         bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
         bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
