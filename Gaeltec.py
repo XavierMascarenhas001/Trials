@@ -1231,6 +1231,15 @@ if filtered_df is not None and not filtered_df.empty:
                     cell.fill = fill
                     cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
                     if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
+                        try:
+                            val = float(cell.value)
+                            if val < 0:
+                                cell.font = red_font
+                            elif val > 0:
+                                cell.font = green_font
+                            else:
+                                cell.font = Font(color="000000")  # black for zero
+                    except ValueError:            
                         cell.font = red_font
 
     # ---- Download button ----
