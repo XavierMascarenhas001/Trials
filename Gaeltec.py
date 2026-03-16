@@ -1094,9 +1094,9 @@ if filtered_df is not None and not filtered_df.empty:
         # ---- Output sheet (start below images) ----
         # Replace NaN in qcvi with blank
         if "qcvi" in export_df.columns:
-            export_df["qcvi"] = export_df["qcvi"].fillna("")
+            export_df["qcvi"] = export_df["qcvi"].apply(lambda x: "" if pd.isna(x) else str(x))
 
-        export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1, na_rep="")
+        export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1)
         ws = writer.book["Output"]
 
         # ---- Summary sheet ----
@@ -1241,7 +1241,7 @@ if filtered_df is not None and not filtered_df.empty:
 
             # Replace any remaining NaN in QCVI with blank for Excel display
             if "QCVI" in final_summary.columns:
-                final_summary["QCVI"] = final_summary["QCVI"].apply(lambda x: "" if pd.isna(x) else x)
+                final_summary["QCVI"] = final_summary["QCVI"].apply(lambda x: "" if pd.isna(x) else str(x))
                 
             final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1, na_rep="")
             ws_summary = writer.book["Summary"]
@@ -1275,7 +1275,7 @@ if filtered_df is not None and not filtered_df.empty:
                     df_breakdown = df_breakdown[cols]
                     # Replace NaN in QCVI with blank
                 if "qcvi" in df_breakdown.columns:
-                    df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else x)
+                    df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(x))
 
                 # Columns to include
                 cols_to_include = [
