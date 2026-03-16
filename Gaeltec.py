@@ -1348,7 +1348,7 @@ if filtered_df is not None and not filtered_df.empty:
                     fill = light_grey_fill if row_idx % 2 == 1 else white_fill
                     for col_idx in range(1, max_col + 1):
                         cell = ws_break.cell(row=row_idx, column=col_idx)
-                        cell.fill = fillvariation_row[col_name] = df_var["qcvi"].sum()
+                        cell.fill = fill
                                 # ---- Color QCVI values red ----
                         if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
                             cell.font = red_font
