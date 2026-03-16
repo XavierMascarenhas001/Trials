@@ -1074,127 +1074,83 @@ if filtered_df is not None and not filtered_df.empty:
     with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
 
         # ---- Prepare export_df ----
-        export_df = filtered_df.copy()
-        export_df = export_df.rename(columns=column_rename_map)
+        export_df = filtered_df.rename(columns=column_rename_map).copy()
 
         if "done" in export_df.columns:
             export_df["done"] = pd.to_datetime(export_df["done"], errors="coerce")
             export_df["done_display"] = export_df["done"].dt.strftime("%d/%m/%Y")
-            export_df.loc[export_df["done"].isna(), "done"] = "Unplanned"
+            export_df.loc[export_df["done"].isna(), "done_display"] = "Unplanned"
 
-        # Columns to include
+        # ---- Keep only needed columns ----
         cols_to_include = [
-            "item","comment", "Quantity_original", "qcvi", "Quantity_used", "material_code",
-            "type", "pole", "datetouse_dt", "District", "project",
-            "Project Manager","location_map", "Circuit", "Segment",
-            "team lider","total", "PID", "sourcefile"
+            "item","comment","Quantity_original","qcvi","Quantity_used","material_code",
+            "type","pole","datetouse_dt","District","project","Project Manager",
+            "location_map","Circuit","Segment","team lider","total","PID","sourcefile"
         ]
-        cols_to_include = [c for c in cols_to_include if c in export_df.columns]
-        export_df = export_df[cols_to_include]
+        export_df = export_df[[c for c in cols_to_include if c in export_df.columns]]
 
-        # ---- Ensure QCVI is object type for Excel ----
+        # ---- Ensure QCVI is string ----
         if "qcvi" in export_df.columns:
-            export_df["qcvi"] = export_df["qcvi"].apply(lambda x: "" if pd.isna(x) else str(int(x)) if x == x else str(x))
+            export_df["qcvi"] = export_df["qcvi"].apply(lambda x: "" if pd.isna(x) else str(int(x)) if pd.api.types.is_number(x) else str(x))
 
         # ---- Output sheet ----
         export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1, na_rep="")
-        ws = writer.book["Output"]
+        ws_output = writer.sheets["Output"]
 
         # ---- Summary sheet ----
-        if "Quantity_used" in export_df.columns:
+        export_df["Quantity_used"] = pd.to_numeric(export_df.get("Quantity_used", 0), errors="coerce").fillna(0)
+        export_df["item_norm"] = export_df["item"].apply(normalize_item)
 
-            # Multiply H poles
-            export_df["Quantity_used"] = pd.to_numeric(export_df["Quantity_used"], errors="coerce").fillna(0)
-            h_mask = export_df["item"].str.contains("'H' HV/EHV Pole", case=False, na=False)
-            h_recover_mask = export_df["item"].str.contains("Recover 'A' / 'H' pole, up", case=False, na=False)
-            export_df.loc[h_mask, "Quantity_used"] *= 2
-            export_df.loc[h_recover_mask, "Quantity_used"] *= 2
+        # Multiply H poles
+        h_mask = export_df["item"].str.contains("'H' HV/EHV Pole", case=False, na=False)
+        h_recover_mask = export_df["item"].str.contains("Recover 'A' / 'H' pole, up", case=False, na=False)
+        export_df.loc[h_mask | h_recover_mask, "Quantity_used"] *= 2
 
-            export_df["item_norm"] = export_df["item"].apply(normalize_item)
+        summary_rows = []
+        for project, df_proj in export_df.groupby("project"):
+            df_proj = df_proj.copy()
+            df_proj["qcvi"] = pd.to_numeric(df_proj.get("qcvi", 0), errors="coerce").fillna(0)
+            summary_rows.append({
+                "Project": project,
+                "CV7_erect": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_erect.keys()])]["Quantity_used"].sum(),
+                "CV7_erect_lv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_erect_lv.keys()])]["Quantity_used"].sum(),
+                "CV7 Recover": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_recover.keys()])]["Quantity_used"].sum(),
+                "CV8": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV8.keys()])]["Quantity_used"].sum(),
+                "CV7 TX": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_Tx.keys()])]["Quantity_used"].sum(),
+                "QCVI": "" if df_proj["qcvi"].sum() == 0 else str(int(df_proj["qcvi"].sum())),
+                "Total Value (£)": df_proj.get("total", pd.Series([0])).sum()
+            })
 
-            # --- Prepare normalization lists ---
-            erect_norm = [normalize_item(i) for i in CV7_erect.keys()]
-            erect_norm_lv = [normalize_item(i) for i in CV7_erect_lv.keys()]
-            recover_norm = [normalize_item(i) for i in CV7_recover.keys()]
-            tx_norm = [normalize_item(i) for i in CV7_Tx.keys()]
-            conductor_hv_norm = [normalize_item(i) for i in CV7_OHL_CONDUCTOR.keys()]
-            conductor_lv_norm = [normalize_item(i) for i in CV7_OHL_CONDUCTOR_LV.keys()]
-            switchgear_norm = [normalize_item(i) for i in CV7_SWITCHGEAR.keys()]
-            ug_norm = [normalize_item(i) for i in CV7_UG.keys()]
-            cb_norm = [normalize_item(i) for i in CV7_CB.keys()]
-            cv31_norm = [normalize_item(i) for i in CV31.keys()]
-            cv8_norm = [normalize_item(i) for i in CV8.keys()]
-
-            # ---- Build summary per project ----
-            summary_rows = []
-            for project, df_proj in export_df.groupby("project"):
-                df_proj = df_proj.copy()
-
-                if "qcvi" in df_proj.columns:
-                    df_proj["qcvi"] = pd.to_numeric(df_proj["qcvi"], errors="coerce")
-                else:
-                    df_proj["qcvi"] = 0
-
-                summary_rows.append({
-                    "Project": project,
-                    "CV7_erect": df_proj[df_proj["item_norm"].isin(erect_norm)]["Quantity_used"].sum(),
-                    "CV7_erect_lv": df_proj[df_proj["item_norm"].isin(erect_norm_lv)]["Quantity_used"].sum(),
-                    "CV7 Recover": df_proj[df_proj["item_norm"].isin(recover_norm)]["Quantity_used"].sum(),
-                    "CV8": df_proj[df_proj["item_norm"].isin(cv8_norm)]["Quantity_used"].sum(),
-                    "CV7 TX": df_proj[df_proj["item_norm"].isin(tx_norm)]["Quantity_used"].sum(),
-                    "CV7 HV Conductor": df_proj[df_proj["item_norm"].isin(conductor_hv_norm)]["Quantity_used"].sum(),
-                    "CV7 LV Conductor": df_proj[df_proj["item_norm"].isin(conductor_lv_norm)]["Quantity_used"].sum(),
-                    "CV7 Switchgear": df_proj[df_proj["item_norm"].isin(switchgear_norm)]["Quantity_used"].sum(),
-                    "CV7 UG": df_proj[df_proj["item_norm"].isin(ug_norm)]["Quantity_used"].sum(),
-                    "CV7 CB": df_proj[df_proj["item_norm"].isin(cb_norm)]["Quantity_used"].sum(),
-                    "CV31": df_proj[df_proj["item_norm"].isin(cv31_norm)]["Quantity_used"].sum(),
-                    "QCVI": "" if df_proj["qcvi"].sum() == 0 else str(int(df_proj["qcvi"].sum())),
-                    "Total Value (£)": df_proj["total"].sum() if "total" in df_proj.columns else 0
-                })
-
-            final_summary = pd.DataFrame(summary_rows).sort_values("Project")
-
-            # Add Total row
+        final_summary = pd.DataFrame(summary_rows).sort_values("Project")
+        # Add total row
+        if not final_summary.empty:
             total_row = final_summary.select_dtypes(include="number").sum().to_dict()
             total_row["Project"] = "Total"
-            if "QCVI" in final_summary.columns:
-                total_row["QCVI"] = ""
+            total_row["QCVI"] = ""
             final_summary = pd.concat([final_summary, pd.DataFrame([total_row])], ignore_index=True)
 
-            final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1, na_rep="")
-            ws_summary = writer.book["Summary"]
+        final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1, na_rep="")
+        ws_summary = writer.sheets["Summary"]
 
         # ---- Breakdown sheets ----
         breakdown_columns = {
-            "CV7_erect": erect_norm,
-            "CV7_erect_lv": erect_norm_lv,
-            "CV7_recover": recover_norm,
-            "CV8": cv8_norm,
-            "CV7 TX": tx_norm,
-            "CV7 HV Conductor": conductor_hv_norm,
-            "CV7 LV Conductor": conductor_lv_norm,
-            "CV7 Switchgear": switchgear_norm,
-            "CV7 UG": ug_norm,
-            "CV31": cv31_norm,
+            "CV7_erect": CV7_erect.keys(),
+            "CV7_erect_lv": CV7_erect_lv.keys(),
+            "CV7_recover": CV7_recover.keys(),
+            "CV8": CV8.keys(),
+            "CV7 TX": CV7_Tx.keys()
         }
 
         for col_name, keys in breakdown_columns.items():
-            df_breakdown = export_df[export_df["item_norm"].isin(keys)].copy()
+            df_breakdown = export_df[export_df["item_norm"].isin([normalize_item(k) for k in keys])].copy()
+            if df_breakdown.empty:
+                df_breakdown = pd.DataFrame({c: [] for c in cols_to_include})
 
-            # Ensure QCVI as string
             if "qcvi" in df_breakdown.columns:
-                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(int(x)))
+                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if pd.isna(x) else str(int(x)) if pd.api.types.is_number(x) else str(x))
 
-            # Columns to include
-            cols_to_include = [
-                "item","comment","Quantity_used","qcvi","material_code","pole","datetouse_dt","done_display",
-                "District", "project","Project Manager","location_map","Circuit","Segment","sourcefile"
-            ]
-            cols_to_include = [c for c in cols_to_include if c in df_breakdown.columns]
-            df_breakdown = df_breakdown[cols_to_include]
-
-            # Write sheet
-            df_breakdown.to_excel(writer, sheet_name=col_name[:31], index=False, startrow=1, na_rep="")
+            sheet_name = col_name[:31]
+            df_breakdown.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1, na_rep="")
                 
 
             for col_name, keys in breakdown_columns.items():
