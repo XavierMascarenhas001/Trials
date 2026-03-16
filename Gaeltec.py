@@ -1542,7 +1542,7 @@ with col_full:
 
         # Draw the bar chart
         # FIX: Use go.Figure with explicit data types
-        fig = go.Figure(data=[
+        fig = go.Figure()
         fig.add_bar(
             x=bar_data['Mapped'],
             y=bar_data['Total'],
