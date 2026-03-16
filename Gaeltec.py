@@ -1096,7 +1096,7 @@ if filtered_df is not None and not filtered_df.empty:
         if "qcvi" in export_df.columns:
             export_df["qcvi"] = export_df["qcvi"].fillna("")
 
-        export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1)
+        export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1, na_rep="")
         ws = writer.book["Output"]
 
         # ---- Summary sheet ----
@@ -1243,7 +1243,7 @@ if filtered_df is not None and not filtered_df.empty:
             if "QCVI" in final_summary.columns:
                 final_summary["QCVI"] = final_summary["QCVI"].apply(lambda x: "" if pd.isna(x) else x)
                 
-            final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1)
+            final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=1, na_rep="")
             ws_summary = writer.book["Summary"]
 
             for col_name, keys in breakdown_columns.items():
@@ -1286,7 +1286,7 @@ if filtered_df is not None and not filtered_df.empty:
                 df_breakdown = df_breakdown[cols_to_include]
 
                 # Write sheet
-                df_breakdown.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1)
+                df_breakdown.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1, na_rep="")
                 ws_break = writer.book[sheet_name]
 
                 # ---- Formatting ----
