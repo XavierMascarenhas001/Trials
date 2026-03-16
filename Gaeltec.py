@@ -1507,15 +1507,16 @@ with col_full:
                 errors='coerce'
             )
             sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
+            
 
     # Clean qvci
-        if 'qvci' in sub_df.columns:
-            sub_df['qvci_clean'] = pd.to_numeric(
-                sub_df['qvci'].astype(str).str.replace(" ", "").str.replace(",", ".", regex=False),
-                errors='coerce'
-            ).fillna(0)
-        else:
-            sub_df['qvci_clean'] = 0
+            if 'qvci' in sub_df.columns:
+                sub_df['qvci_clean'] = pd.to_numeric(
+                    sub_df['qvci'].astype(str).str.replace(" ", "").str.replace(",", ".", regex=False),
+                    errors='coerce'
+                ).fillna(0)
+            else:
+                sub_df['qvci_clean'] = 0
 
     # 🔹 NEW AGGREGATION INCLUDING VARIATION
             bar_data = sub_df.groupby('mapped').agg(Total=('adj_value','sum'),Variation=('qvci_clean','sum')).reset_index()
