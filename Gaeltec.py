@@ -1124,7 +1124,7 @@ if filtered_df is not None and not filtered_df.empty:
                 "ug_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_UG.keys()])]["Quantity_used"].sum(),
                 "cb_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_CB.keys()])]["Quantity_used"].sum(),
                 "cv31_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV31.keys()])]["Quantity_used"].sum(),
-                "Total Value (£)": df_proj.get("total", pd.Series([0])).sum()
+                "Total Value (£)": df_proj.get("total", pd.Series([0])).sum(),
                 "QCVI": df_proj["qcvi"].sum()
             })
 
