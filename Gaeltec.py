@@ -1510,17 +1510,33 @@ with col_full:
             
 
     # 🔹 NEW AGGREGATION INCLUDING VARIATION
-            bar_data = sub_df.groupby('mapped').agg(Total=('adj_value', 'sum'),Variation=('qvci_clean', 'sum')).reset_index()
+    # Clean qvci
+            if 'qvci' in sub_df.columns:
+                sub_df['qvci_clean'] = pd.to_numeric(sub_df['qvci'].astype(str).str.replace(" ", "").str.replace(",", ".", regex=False),errors='coerce').fillna(0)
+                
+            else:
+                sub_df['qvci_clean'] = 0
+
+            # Aggregate safely
+            bar_data = sub_df.groupby('mapped').agg(
+                Total=('adj_value', 'sum'),
+                Variation=('qvci_clean', 'sum')).reset_index()
+            bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
+
         else:
-            bar_data = sub_df['mapped'].value_counts().reset_index()
-            bar_data.columns = ['Mapped', 'Total']
-            bar_data['Variation'] = 0
+            if not sub_df.empty:
+                bar_data = sub_df['mapped'].value_counts().reset_index()
+                bar_data.columns = ['Mapped', 'Total']
+                bar_data['Variation'] = 0
+            else:
+                # Empty DataFrame if no rows
+                bar_data = pd.DataFrame(columns=['Mapped','Total','Variation'])
 
             
         if 'Variation' not in bar_data.columns:
             bar_data['Variation'] = 0
-            bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
-            bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
+        bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
+        bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
 
         # Divide Conductors_2 by 1000
         if cat_name == "Conductors_2":
