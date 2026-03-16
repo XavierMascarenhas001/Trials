@@ -1157,7 +1157,7 @@ if filtered_df is not None and not filtered_df.empty:
 
             if "qcvi" in df_breakdown.columns:
                 df_breakdown["qcvi"] = pd.to_numeric(df_breakdown["qcvi"], errors="coerce").fillna(0)
-                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if x == 0 else str(int(x))
+                df_breakdown["qcvi"] = df_breakdown["qcvi"].apply(lambda x: "" if x == 0 else str(int(x)))
 
             cols_to_include_sheet = [
                 "item","comment","Quantity_used","qcvi","material_code","pole","datetouse_dt","done_display",
