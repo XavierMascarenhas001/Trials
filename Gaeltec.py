@@ -738,7 +738,7 @@ column_rename_map = {
     "segmentcode": "Circuit",
     "datetouse_display": "Date",
     "qty": "Quantity_original",
-    "qvci":"Variation",
+    "qvci":"qvci",
     "qsub": "Quantity_used",
     "segmentdesc": "Segment",
     "shire": "District",
