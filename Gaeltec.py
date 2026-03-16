@@ -1174,78 +1174,76 @@ if filtered_df is not None and not filtered_df.empty:
 
             # ---- Formatting (headers, logos, etc.) ----
             ws_break.row_dimensions[1].height = 90  # logo row
+            # Logos
+            img1_b = XLImage("Images/GaeltecImage.png")
+            img2_b = XLImage("Images/SPEN.png")
+            IMG_HEIGHT = 120
+            IMG_WIDTH_SMALL = 120
+            IMG_WIDTH_LARGE = IMG_WIDTH_SMALL * 3
 
+            img1_b.width = IMG_WIDTH_SMALL
+            img1_b.height = IMG_HEIGHT
+            img1_b.anchor = "B1"
 
-                # Logos
-                img1_b = XLImage("Images/GaeltecImage.png")
-                img2_b = XLImage("Images/SPEN.png")
-                IMG_HEIGHT = 120
-                IMG_WIDTH_SMALL = 120
-                IMG_WIDTH_LARGE = IMG_WIDTH_SMALL * 3
+            img2_b.width = IMG_WIDTH_LARGE
+            img2_b.height = IMG_HEIGHT
+            img2_b.anchor = "A1"
 
-                img1_b.width = IMG_WIDTH_SMALL
-                img1_b.height = IMG_HEIGHT
-                img1_b.anchor = "B1"
+            ws_break.add_image(img1_b)
+            ws_break.add_image(img2_b)
+            # --- Find QCVI column index
+            qcvi_col_idx = None
+            for col_idx, header_cell in enumerate(ws_break[2], start=1):
+                if header_cell.value == "qcvi":
+                    qcvi_col_idx = col_idx
+                    break
 
-                img2_b.width = IMG_WIDTH_LARGE
-                img2_b.height = IMG_HEIGHT
-                img2_b.anchor = "A1"
+            # Header style
+            header_font = Font(bold=True, size=16)
+            red_font = Font(color="FF0000")  # <-- ADD THIS
+            header_fill = PatternFill(start_color="00CCFF", end_color="00CCFF", fill_type="solid")
+            thin_side = Side(style="thin")
+            medium_side = Side(style="medium")
+            thick_side = Side(style="thick")
+            light_grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+            white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
 
-                ws_break.add_image(img1_b)
-                ws_break.add_image(img2_b)
-                # --- Find QCVI column index
-                qcvi_col_idx = None
-                for col_idx, header_cell in enumerate(ws_break[2], start=1):
-                    if header_cell.value == "qcvi":
-                        qcvi_col_idx = col_idx
-                        break
+            max_col = ws_break.max_column
+            max_row = ws_break.max_row
 
-                # Header style
-                header_font = Font(bold=True, size=16)
-                red_font = Font(color="FF0000")  # <-- ADD THIS
-                header_fill = PatternFill(start_color="00CCFF", end_color="00CCFF", fill_type="solid")
-                thin_side = Side(style="thin")
-                medium_side = Side(style="medium")
-                thick_side = Side(style="thick")
-                light_grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-                white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+            # HEADER → ROW 2
+            for col_idx, cell in enumerate(ws_break[2], start=1):
+                cell.font = header_font
+                cell.fill = header_fill
+                ws_break.column_dimensions[get_column_letter(col_idx)].width = 60 if col_idx == 1 else 20
+                cell.border = Border(
+                    left=thick_side if col_idx == 1 else medium_side,
+                    right=thick_side if col_idx == max_col else medium_side,
+                    top=thick_side,
+                    bottom=thick_side
+                )
 
-                max_col = ws_break.max_column
-                max_row = ws_break.max_row
-
-                # HEADER → ROW 2
-                for col_idx, cell in enumerate(ws_break[2], start=1):
-                    cell.font = header_font
-                    cell.fill = header_fill
-                    ws_break.column_dimensions[get_column_letter(col_idx)].width = 60 if col_idx == 1 else 20
+            # DATA ROWS → START ROW 3
+            # Find QCVI column index
+            qcvi_col_idx = None
+            for col_idx, header_cell in enumerate(ws_break[2], start=1):
+                if header_cell.value == "qcvi":
+                    qcvi_col_idx = col_idx
+                    break
+            for row_idx in range(3, max_row + 1):
+                fill = light_grey_fill if row_idx % 2 == 1 else white_fill
+                for col_idx in range(1, max_col + 1):
+                    cell = ws_break.cell(row=row_idx, column=col_idx)
+                    cell.fill = fill
+                        # ---- Color QCVI values red ----
+                    if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
+                        cell.font = red_font
                     cell.border = Border(
-                        left=thick_side if col_idx == 1 else medium_side,
-                        right=thick_side if col_idx == max_col else medium_side,
-                        top=thick_side,
-                        bottom=thick_side
+                        left=thin_side,
+                        right=thin_side,
+                        top=thin_side,
+                        bottom=thin_side
                     )
-
-                # DATA ROWS → START ROW 3
-                # Find QCVI column index
-                qcvi_col_idx = None
-                for col_idx, header_cell in enumerate(ws_break[2], start=1):
-                    if header_cell.value == "qcvi":
-                        qcvi_col_idx = col_idx
-                        break
-                for row_idx in range(3, max_row + 1):
-                    fill = light_grey_fill if row_idx % 2 == 1 else white_fill
-                    for col_idx in range(1, max_col + 1):
-                        cell = ws_break.cell(row=row_idx, column=col_idx)
-                        cell.fill = fill
-                                # ---- Color QCVI values red ----
-                        if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
-                            cell.font = red_font
-                        cell.border = Border(
-                            left=thin_side,
-                            right=thin_side,
-                            top=thin_side,
-                            bottom=thin_side
-                        )
                         
         # ---- Formatting styles ----
         header_font = Font(bold=True, size=16)
