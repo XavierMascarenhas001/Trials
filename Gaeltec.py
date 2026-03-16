@@ -1096,7 +1096,7 @@ if filtered_df is not None and not filtered_df.empty:
         if "qcvi" in export_df.columns:
             export_df["qcvi"] = export_df["qcvi"].apply(lambda x: "" if pd.isna(x) else str(x))
 
-        export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1)
+        export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1, na_rep="")
         ws = writer.book["Output"]
 
         # ---- Summary sheet ----
