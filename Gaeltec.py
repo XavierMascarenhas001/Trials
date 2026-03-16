@@ -1699,7 +1699,7 @@ with col_full:
                         df_bar['Quantity_original'] = 0
 
                     df_bar = df_bar.rename(columns=column_rename_map)
-                    cols_to_include = ['Output','Quantity_original','qvci','material_code','pole','Date','District','project','Project Manager','Circuit','Segment','team lider','PID', 'sourcefile']
+                    cols_to_include = ['mapped', 'datetouse_display', 'qsub', 'qty', 'qvci'] + extra_cols
                     cols_to_include = [c for c in cols_to_include if c in df_bar.columns]
                     df_bar = df_bar[cols_to_include]
 
