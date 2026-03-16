@@ -1239,7 +1239,7 @@ if filtered_df is not None and not filtered_df.empty:
                                 cell.font = green_font
                             else:
                                 cell.font = Font(color="000000")  # black for zero
-                    except ValueError:
+                        except ValueError:
                             cell.font = Font(color="000000")
 
     # ---- Download button ----
