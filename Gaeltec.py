@@ -27,6 +27,11 @@ from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import numbers
+import plotly.graph_objects as go
+# ---- Formatting & logos (after all sheets written) ----
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.styles import Font, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
 
 # --- Page config for wide layout ---
 st.set_page_config(
@@ -947,7 +952,6 @@ if not filtered_df.empty and 'datetouse_dt' in filtered_df.columns and 'total' i
     # Ensure datetime column
     revenue_df['datetouse_dt'] = pd.to_datetime(revenue_df['datetouse_dt'])
 
-    import plotly.graph_objects as go
     fig = go.Figure()
 
     # Scatter points (all data)
@@ -1644,10 +1648,6 @@ if filtered_df is not None and not filtered_df.empty:
             sheet_name_safe = col_name[:31]
             df_breakdown.to_excel(writer, sheet_name=sheet_name_safe, index=False, startrow=1, na_rep="")
 
-        # ---- Formatting & logos (after all sheets written) ----
-        from openpyxl.drawing.image import Image as XLImage
-        from openpyxl.styles import Font, PatternFill, Border, Side
-        from openpyxl.utils import get_column_letter
 
         IMG_HEIGHT = 120
         IMG_WIDTH_SMALL = 120
