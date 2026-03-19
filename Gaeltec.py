@@ -732,38 +732,7 @@ def load_parquet(file):
 master_file = st.file_uploader("Upload Master.parquet", type=["parquet"], key="master")
 base_df = None
 
-if master_file is not None:
-    base_df = load_parquet(master_file)
 
-resume_file = st.file_uploader(
-    "Upload CF_resume.parquet",
-    type=["parquet"],
-    key="resume_file"
-)
-resume_df = None
-
-if resume_file is not None:
-    resume_df = pd.read_parquet(resume_file)
-    resume_df.columns = resume_df.columns.str.strip().str.lower()
-
-misc_file = st.file_uploader(
-    "Upload miscellaneous.parquet",
-    type=["parquet"],
-    key="misc_file"
-)
-misc_df = None
-
-if misc_file is not None:
-    try:
-        misc_df = pd.read_parquet(misc_file)
-        misc_df.columns = misc_df.columns.str.strip().str.lower()
-    except Exception as e:
-        st.warning(f"Could not load Miscellaneous parquet: {e}")
-
-base_df = None
-st.header("Upload Data Files")
-
-agg_view = None
 
 # -------------------------------
 # Date Source Selector
