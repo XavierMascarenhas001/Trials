@@ -29,9 +29,6 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import numbers
 import plotly.graph_objects as go
 # ---- Formatting & logos (after all sheets written) ----
-from openpyxl.drawing.image import Image as XLImage
-from openpyxl.styles import Font, PatternFill, Border, Side
-from openpyxl.utils import get_column_letter
 
 # --- Page config for wide layout ---
 st.set_page_config(
@@ -334,6 +331,9 @@ def to_excel(project_df, team_df):
     return output
 
 def generate_excel_styled_multilevel(filtered_df, poles_df=None):
+    from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.styles import Font, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
     wb = Workbook()
     ws = wb.active
     ws.title = "Daily Revenue"
