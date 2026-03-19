@@ -1009,7 +1009,8 @@ if filtered_df is not None and not filtered_df.empty:
         # Ensure QCVI is string for Excel
         if "qcvi" in export_df.columns:
             export_df["qcvi"] = pd.to_numeric(export_df["qcvi"], errors="coerce").fillna(0)
-            export_df["qcvi"] = export_df["qcvi"].apply(lambda x: "" if x == 0 else str(int(x)))
+            qcvi_vals = export_df["qcvi"].fillna(0).astype(int)
+            export_df["qcvi"] = qcvi_vals.astype(str).replace({"0": ""})
         # ---- Output sheet ----
         export_df.to_excel(writer, sheet_name="Output", index=False, startrow=1, na_rep="")
         ws_output = writer.sheets["Output"]
