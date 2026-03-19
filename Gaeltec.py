@@ -765,21 +765,6 @@ st.header("Upload Data Files")
 
 agg_view = None
 
-if master_file is not None:
-    df = pd.read_parquet(master_file)
-    df.columns = df.columns.str.strip().str.lower()  # normalize columns
-
-    if 'datetouse' in df.columns:
-        df['datetouse_dt'] = pd.to_datetime(df['datetouse'], errors='coerce')
-        df['datetouse_display'] = df['datetouse_dt'].dt.strftime("%d/%m/%Y")
-        df.loc[df['datetouse_dt'].isna(), 'datetouse_display'] = "Unplanned"
-        df['datetouse_dt'] = df['datetouse_dt'].dt.normalize()
-    else:
-        df['datetouse_dt'] = pd.NaT
-        df['datetouse_display'] = "Unplanned"
-
-    agg_view = df.copy()
-
 # -------------------------------
 # Date Source Selector
 # -------------------------------
