@@ -35,6 +35,24 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def preprocess_df(df, date_column='datetouse', numeric_cols=['total','orig']):
+    # Ensure column names are lowercase and stripped
+    df.columns = df.columns.str.strip().str.lower()
+    
+    # Dates
+    df[date_column + '_dt'] = pd.to_datetime(df.get(date_column), errors='coerce').dt.normalize()
+    df[date_column + '_display'] = df[date_column + '_dt'].dt.strftime("%d/%m/%Y")
+    df[date_column + '_display'].fillna("Unplanned", inplace=True)
+
+    # Numeric columns
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(
+                df[col].astype(str).str.replace(" ", "").str.replace(",", ".", regex=False),
+                errors='coerce'
+            )
+    return df
+
 def sanitize_sheet_name(name: str) -> str:
     """
     Remove or replace invalid characters for Excel sheet names.
@@ -723,14 +741,16 @@ st.header("Upload Data Files")
 # Load Aggregated Parquet
 # -------------------------------
 @st.cache_data
-def load_parquet(file):
-    import pandas as pd
+def load_master(file):
     df = pd.read_parquet(file, engine='pyarrow')  # pyarrow is faster
-    df.columns = df.columns.str.strip().str.lower()  # normalize once
+    df = preprocess_df(df)                        # preprocess once
     return df
 
 master_file = st.file_uploader("Upload Master.parquet", type=["parquet"], key="master")
 base_df = None
+
+if master_file is not None:
+    base_df = load_master(master_file)
 
 
 
