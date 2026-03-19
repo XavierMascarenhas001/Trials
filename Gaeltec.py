@@ -1665,6 +1665,7 @@ if filtered_df is not None and not filtered_df.empty:
 
 
         for ws in writer.sheets.values():
+            ws_output = writer.sheets["Output"]  # must exist first
             ws.row_dimensions[1].height = 90  # logo row
 
             # Add images
