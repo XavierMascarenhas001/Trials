@@ -1376,18 +1376,12 @@ else:
 
 # --- Right: Projects & Circuits Overview ---
 # --------------------------------------------------
-# LAYOUT
-# -------------------------------------------------
-
-# --------------------------------------------------
-# RIGHT SIDE: PROJECTS & CIRCUITS OVERVIEW
-# --------------------------------------------------
-# --------------------------------------------------
 # FUNCTION: GENERATE EXCEL FILE
 # --------------------------------------------------
 def generate_excel_styled_multilevel(df, poles=None):
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    # Use openpyxl to avoid missing xlsxwriter
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Data')
 
         if poles is not None:
@@ -1396,22 +1390,21 @@ def generate_excel_styled_multilevel(df, poles=None):
     output.seek(0)
     return output
 
-
-st.set_page_config(layout="wide")
-
 # --------------------------------------------------
-# CENTERED CONTAINER
+# CENTERED LAYOUT
 # --------------------------------------------------
 center_col = st.columns([1, 3, 1])[1]
 
 with center_col:
-
     st.markdown(
         "<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>",
         unsafe_allow_html=True
     )
 
-    if 'project' in filtered_df.columns:
+    required_cols = ['project', 'segmentcode']
+    existing_cols = [c for c in required_cols if c in filtered_df.columns]
+
+    if 'project' in existing_cols:
         projects = filtered_df['project'].dropna().unique()
 
         if len(projects) == 0:
@@ -1420,56 +1413,70 @@ with center_col:
             for proj in sorted(projects):
                 proj_df = filtered_df[filtered_df['project'] == proj]
 
-                segments = (
-                    proj_df[['segmentcode', 'sourcefile']]
-                    .dropna(subset=['segmentcode'])
-                    .drop_duplicates()
-                )
+                # include segmentcode and sourcefile if available
+                cols_to_use = [c for c in ['segmentcode', 'sourcefile'] if c in proj_df.columns]
+
+                if cols_to_use:
+                    segments = proj_df[cols_to_use].dropna(subset=['segmentcode']).drop_duplicates()
+                else:
+                    segments = pd.DataFrame()
 
                 with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
                     if not segments.empty:
+                        # Prepare display text
+                        display_lines = []
+                        for _, row in segments.iterrows():
+                            seg = str(row.get("segmentcode", ""))
+                            src = str(row.get("sourcefile", ""))
+                            if src:
+                                display_lines.append(f"{seg}  |  {src}")
+                            else:
+                                display_lines.append(seg)
 
-                        # ✅ TABLE DISPLAY
-                        st.dataframe(
-                            segments,
-                            use_container_width=True,
-                            height=250
+                        st.markdown(
+                            "<div style='max-height:200px; overflow-y:auto; padding:8px; border:1px solid #444; background-color:#111;'>"
+                            + "<br>".join(display_lines)
+                            + "</div>",
+                            unsafe_allow_html=True
                         )
-
-                        # ✅ DOWNLOAD PER PROJECT
-                        csv = segments.to_csv(index=False).encode('utf-8')
-
-                        st.download_button(
-                            label=f"📥 Download {proj} circuits",
-                            data=csv,
-                            file_name=f"{proj}_circuits.csv",
-                            mime="text/csv"
-                        )
-
                     else:
                         st.write("No circuit codes for this project.")
+
     else:
-        st.info("Project not found in the data.")
+        st.info("Project or Circuit not found in the data.")
 
 # --------------------------------------------------
-# GLOBAL DOWNLOAD BUTTON (CENTERED)
+# GLOBAL EXCEL DOWNLOAD BUTTON
 # --------------------------------------------------
 st.markdown("---")
 
 with center_col:
     if 'filtered_df' in locals() and not filtered_df.empty:
-
         excel_file = generate_excel_styled_multilevel(
             filtered_df,
             poles_df if 'poles_df' in locals() else None
         )
 
         st.download_button(
-            label="📥 Download Full Excel Report",
+            label=f"📥 High level planning & Poles Excel",
             data=excel_file,
-            file_name="High_level_planning.xlsx",
+            file_name=f"High_level_planning_{date_range_str}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
+# --------------------------------------------------
+# OPTIONAL: PER-PROJECT CSV DOWNLOAD
+# --------------------------------------------------
+with center_col:
+    st.markdown("<h3>Download per project</h3>", unsafe_allow_html=True)
+    for proj in sorted(filtered_df['project'].dropna().unique()):
+        proj_df = filtered_df[filtered_df['project'] == proj]
+        csv = proj_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label=f"📥 Download {proj} circuits",
+            data=csv,
+            file_name=f"{proj}_circuits.csv",
+            mime="text/csv"
+        )
 
 
