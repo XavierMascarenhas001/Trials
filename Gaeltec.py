@@ -1395,10 +1395,19 @@ def generate_excel_styled_multilevel(df, poles=None):
 
     output.seek(0)
     return output
-    
-with col_top_right:
+
+
+st.set_page_config(layout="wide")
+
+# --------------------------------------------------
+# CENTERED CONTAINER
+# --------------------------------------------------
+center_col = st.columns([1, 3, 1])[1]
+
+with center_col:
+
     st.markdown(
-        "<h3 style='color:white;'>Projects & Circuits Overview</h3>",
+        "<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>",
         unsafe_allow_html=True
     )
 
@@ -1436,29 +1445,31 @@ with col_top_right:
                             file_name=f"{proj}_circuits.csv",
                             mime="text/csv"
                         )
+
                     else:
                         st.write("No circuit codes for this project.")
     else:
         st.info("Project not found in the data.")
 
 # --------------------------------------------------
-# GLOBAL DOWNLOAD BUTTON
+# GLOBAL DOWNLOAD BUTTON (CENTERED)
 # --------------------------------------------------
 st.markdown("---")
 
-if not filtered_df.empty:
-    excel_file = generate_excel_styled_multilevel(
-        filtered_df,
-        poles_df
-    )
+with center_col:
+    if 'filtered_df' in locals() and not filtered_df.empty:
 
-    st.download_button(
-        label="📥 Download Full Excel Report",
-        data=excel_file,
-        file_name="High_level_planning.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-        
+        excel_file = generate_excel_styled_multilevel(
+            filtered_df,
+            poles_df if 'poles_df' in locals() else None
+        )
+
+        st.download_button(
+            label="📥 Download Full Excel Report",
+            data=excel_file,
+            file_name="High_level_planning.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 
 
