@@ -12,3 +12,4 @@ openpyxl
 matplotlib
 python-docx
 rapidfuzz
+xlsxwriter
