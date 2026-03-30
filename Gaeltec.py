@@ -1375,48 +1375,88 @@ else:
     st.info("No data available for Excel export.")
 
 # --- Right: Projects & Circuits Overview ---
-with col_top_right:
-    st.markdown("<h3 style='color:white;'>Projects & Circuits Overview</h3>", unsafe_allow_html=True)
-    required_cols = ['project', 'segmentcode']
-    existing_cols = [c for c in required_cols if c in filtered_df.columns]
+# --------------------------------------------------
+# LAYOUT
+# --------------------------------------------------
+col_top_left, col_top_right = st.columns([1, 2])
 
-    if 'project' in existing_cols:
+# --------------------------------------------------
+# RIGHT SIDE: PROJECTS & CIRCUITS OVERVIEW
+# --------------------------------------------------
+# --------------------------------------------------
+# FUNCTION: GENERATE EXCEL FILE
+# --------------------------------------------------
+def generate_excel_styled_multilevel(df, poles=None):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+
+        if poles is not None:
+            poles.to_excel(writer, index=False, sheet_name='Poles')
+
+    output.seek(0)
+    return output
+    
+with col_top_right:
+    st.markdown(
+        "<h3 style='color:white;'>Projects & Circuits Overview</h3>",
+        unsafe_allow_html=True
+    )
+
+    if 'project' in filtered_df.columns:
         projects = filtered_df['project'].dropna().unique()
+
         if len(projects) == 0:
             st.info("No projects found for the selected filters.")
         else:
             for proj in sorted(projects):
                 proj_df = filtered_df[filtered_df['project'] == proj]
-                segments = proj_df[['segmentcode', 'sourcefile']].dropna(subset=['segmentcode']).drop_duplicates()
+
+                segments = (
+                    proj_df[['segmentcode', 'sourcefile']]
+                    .dropna(subset=['segmentcode'])
+                    .drop_duplicates()
+                )
 
                 with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
                     if not segments.empty:
-                        display_text = []
-                        for _, row in segments.iterrows():
-                            seg = row["segmentcode"]
-                            src = row["sourcefile"] if "sourcefile" in segments.columns else ""
-                            display_text.append(f"{seg}  |  {src}")
-                        st.markdown(
-                            "<div style='max-height:150px; overflow-y:auto; padding:5px; border:1px solid #444;'>"
-                            + "<br>".join(segments.astype(str))
-                            + "</div>",
-                            unsafe_allow_html=True
+
+                        # ✅ TABLE DISPLAY
+                        st.dataframe(
+                            segments,
+                            use_container_width=True,
+                            height=250
+                        )
+
+                        # ✅ DOWNLOAD PER PROJECT
+                        csv = segments.to_csv(index=False).encode('utf-8')
+
+                        st.download_button(
+                            label=f"📥 Download {proj} circuits",
+                            data=csv,
+                            file_name=f"{proj}_circuits.csv",
+                            mime="text/csv"
                         )
                     else:
                         st.write("No circuit codes for this project.")
     else:
-        st.info("Project or Circuit not found in the data.")
+        st.info("Project not found in the data.")
 
-# --- Download button ---
-if 'filtered_df' in locals() and not filtered_df.empty:
+# --------------------------------------------------
+# GLOBAL DOWNLOAD BUTTON
+# --------------------------------------------------
+st.markdown("---")
+
+if not filtered_df.empty:
     excel_file = generate_excel_styled_multilevel(
         filtered_df,
-        poles_df if 'poles_df' in locals() else None
+        poles_df
     )
+
     st.download_button(
-        label="📥 High level planning & Poles Excel",
+        label="📥 Download Full Excel Report",
         data=excel_file,
-        file_name=f"High level planning_{date_range_str}.xlsx",
+        file_name="High_level_planning.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
         
