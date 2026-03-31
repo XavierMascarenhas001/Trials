@@ -1435,7 +1435,7 @@ with center_col:
 
                 segments = (
                     proj_df[cols_to_use]
-                    .dropna(subset=['Circuit'])
+                    .dropna(subset=['circuit'])
                     .drop_duplicates()
                 )
 
@@ -1445,9 +1445,9 @@ with center_col:
                         display_lines = []
 
                         for _, row in segments.iterrows():
-                            district = str(row.get("District", ""))
+                            district = str(row.get("district", ""))
                             date = str(row.get("datetouse_dt", ""))
-                            circuit = str(row.get("Circuit", ""))
+                            circuit = str(row.get("circuit", ""))
                             segment = str(row.get("segmentdesc", ""))
 
                             line = f"{district} | {date} | {circuit} | {segment}"
