@@ -1418,7 +1418,7 @@ with center_col:
     )
 
     # ✅ REQUIRED COLUMNS (UPDATED)
-    required_cols = ['District', 'datetouse_dt', 'project', 'Circuit', 'segmentdesc']
+    required_cols = ['district', 'datetouse_dt', 'project', 'circuit', 'segmentdesc']
     existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
     if 'project' in existing_cols:
@@ -1485,10 +1485,10 @@ with center_col:
 
         # ✅ DEFINE EXPORT COLUMNS (MATCH DISPLAY)
         export_columns = [
-            "District",
+            "district",
             "datetouse_dt",
             "project",
-            "Circuit",
+            "circuit",
             "segmentdesc"
         ]
 
@@ -1513,13 +1513,13 @@ with center_col:
     st.markdown("<h3>Download per project</h3>", unsafe_allow_html=True)
 
     export_columns = [
-        "District",
+        "district",
         "datetouse_dt",
         "project",
-        "Circuit",
+        "circuit",
         "segmentdesc"
     ]
-
+    
     for proj in sorted(filtered_df['project'].dropna().unique()):
         proj_df = filtered_df[filtered_df['project'] == proj]
 
