@@ -1418,7 +1418,7 @@ with center_col:
     )
 
     # ✅ REQUIRED COLUMNS (UPDATED)
-    required_cols = ['district', 'datetouse_dt', 'project', 'circuit', 'segmentdesc']
+    required_cols = ['district', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
     existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
     if 'project' in existing_cols:
@@ -1447,7 +1447,7 @@ with center_col:
                         for _, row in segments.iterrows():
                             district = str(row.get("district", ""))
                             date = str(row.get("datetouse_dt", ""))
-                            circuit = str(row.get("circuit", ""))
+                            circuit = str(row.get("segmentcode", ""))
                             segment = str(row.get("segmentdesc", ""))
 
                             line = f"{district} | {date} | {circuit} | {segment}"
@@ -1488,7 +1488,7 @@ with center_col:
             "district",
             "datetouse_dt",
             "project",
-            "circuit",
+            "segmentcode",
             "segmentdesc"
         ]
 
@@ -1516,7 +1516,7 @@ with center_col:
         "district",
         "datetouse_dt",
         "project",
-        "circuit",
+        "segmentcode",
         "segmentdesc"
     ]
     
