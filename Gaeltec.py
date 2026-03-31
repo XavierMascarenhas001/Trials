@@ -1410,6 +1410,7 @@ st.markdown("""
 # --------------------------------------------------
 # DISPLAY SECTION
 # --------------------------------------------------
+col1, center_col, col3 = st.columns([1, 3, 1])
 with center_col:
     st.markdown(
         "<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>",
