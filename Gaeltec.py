@@ -1435,7 +1435,7 @@ with center_col:
 
                 segments = (
                     proj_df[cols_to_use]
-                    .dropna(subset=['circuit'])
+                    .dropna(subset=['segmentcode'])
                     .drop_duplicates()
                 )
 
