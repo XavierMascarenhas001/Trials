@@ -1112,167 +1112,6 @@ for cat_name, keys, y_label in categories:
             st.write(f"**Total records:** {len(selected_rows)}")
 
 
-# --- Right: Projects & Circuits Overview ---
-# --------------------------------------------------
-# FUNCTION: GENERATE EXCEL FILE
-# --------------------------------------------------
-def generate_excel_styled_multilevel(df, poles=None):
-    output = BytesIO()
-    # Use openpyxl to avoid missing xlsxwriter
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Data')
-
-        if poles is not None:
-            poles.to_excel(writer, index=False, sheet_name='Poles')
-
-    output.seek(0)
-    return output
-
-
-# --------------------------------------------------
-# PAGE / LAYOUT (WIDER DISPLAY)
-# --------------------------------------------------
-st.set_page_config(layout="wide")
-
-# Optional: make content visually wider
-st.markdown("""
-    <style>
-        .block-container {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
-            max-width: 95%;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
-# --------------------------------------------------
-# DISPLAY SECTION
-# --------------------------------------------------
-col1, center_col, col3 = st.columns([1, 3, 1])
-with center_col:
-    st.markdown(
-        "<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>",
-        unsafe_allow_html=True
-    )
-
-    # ✅ REQUIRED COLUMNS (UPDATED)
-    required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
-    existing_cols = [c for c in required_cols if c in filtered_df.columns]
-
-    if 'project' in existing_cols:
-        projects = filtered_df['project'].dropna().unique()
-
-        if len(projects) == 0:
-            st.info("No projects found for the selected filters.")
-        else:
-            for proj in sorted(projects):
-                proj_df = filtered_df[filtered_df['project'] == proj]
-
-                # ✅ columns for display
-                cols_to_use = [c for c in required_cols if c in proj_df.columns]
-
-                segments = (
-                    proj_df[cols_to_use]
-                    .dropna(subset=['segmentcode'])
-                    .drop_duplicates()
-                )
-
-                with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
-                    if not segments.empty:
-
-                        display_lines = []
-
-                        for _, row in segments.iterrows():
-                            district = str(row.get("shire", ""))
-                            date = str(row.get("datetouse_dt", ""))
-                            circuit = str(row.get("segmentcode", ""))
-                            segment = str(row.get("segmentdesc", ""))
-
-                            line = f"{district} | {date} | {circuit} | {segment}"
-                            display_lines.append(line)
-
-                        # ✅ WIDER + SCROLLABLE DISPLAY BOX
-                        st.markdown(
-                            """
-                            <div style='
-                                max-height:300px;
-                                overflow-y:auto;
-                                padding:12px;
-                                border:1px solid #444;
-                                background-color:#111;
-                                font-family:monospace;
-                                font-size:14px;
-                                white-space:nowrap;
-                            '>
-                            """ + "<br>".join(display_lines) + "</div>",
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        st.write("No circuit data for this project.")
-
-    else:
-        st.info("Project column not found in the data.")
-
-# --------------------------------------------------
-# GLOBAL EXCEL DOWNLOAD BUTTON
-# --------------------------------------------------
-st.markdown("---")
-
-with center_col:
-    if 'filtered_df' in locals() and not filtered_df.empty:
-
-        # ✅ DEFINE EXPORT COLUMNS (MATCH DISPLAY)
-        export_columns = [
-            "shire",
-            "datetouse_dt",
-            "project",
-            "segmentcode",
-            "segmentdesc"
-        ]
-
-        export_df = filtered_df[[c for c in export_columns if c in filtered_df.columns]].copy()
-
-        excel_file = generate_excel_styled_multilevel(
-            export_df,
-            poles_df if 'poles_df' in locals() else None
-        )
-
-        st.download_button(
-            label="📥 High level planning & Poles Excel",
-            data=excel_file,
-            file_name=f"High_level_planning_{date_range_str}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-# --------------------------------------------------
-# OPTIONAL: PER-PROJECT CSV DOWNLOAD
-# --------------------------------------------------
-with center_col:
-    st.markdown("<h3>Download per project</h3>", unsafe_allow_html=True)
-
-    export_columns = [
-        "shire",
-        "datetouse_dt",
-        "project",
-        "segmentcode",
-        "segmentdesc"
-    ]
-    
-    for proj in sorted(filtered_df['project'].dropna().unique()):
-        proj_df = filtered_df[filtered_df['project'] == proj]
-
-        proj_export = proj_df[[c for c in export_columns if c in proj_df.columns]].copy()
-
-        csv = proj_export.to_csv(index=False).encode('utf-8')
-
-        st.download_button(
-            label=f"📥 Download {proj} circuits",
-            data=csv,
-            file_name=f"{proj}_circuits.csv",
-            mime="text/csv"
-        )
-
-
 
 
 # -------------------------------
@@ -1538,4 +1377,164 @@ if filtered_df is not None and not filtered_df.empty:
 else:
     st.info("No data available for Excel export.")
 
+
+# --- Right: Projects & Circuits Overview ---
+# --------------------------------------------------
+# FUNCTION: GENERATE EXCEL FILE
+# --------------------------------------------------
+def generate_excel_styled_multilevel(df, poles=None):
+    output = BytesIO()
+    # Use openpyxl to avoid missing xlsxwriter
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+
+        if poles is not None:
+            poles.to_excel(writer, index=False, sheet_name='Poles')
+
+    output.seek(0)
+    return output
+
+
+# --------------------------------------------------
+# PAGE / LAYOUT (WIDER DISPLAY)
+# --------------------------------------------------
+st.set_page_config(layout="wide")
+
+# Optional: make content visually wider
+st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            max-width: 95%;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --------------------------------------------------
+# DISPLAY SECTION
+# --------------------------------------------------
+col1, center_col, col3 = st.columns([1, 3, 1])
+with center_col:
+    st.markdown(
+        "<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>",
+        unsafe_allow_html=True
+    )
+
+    # ✅ REQUIRED COLUMNS (UPDATED)
+    required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
+    existing_cols = [c for c in required_cols if c in filtered_df.columns]
+
+    if 'project' in existing_cols:
+        projects = filtered_df['project'].dropna().unique()
+
+        if len(projects) == 0:
+            st.info("No projects found for the selected filters.")
+        else:
+            for proj in sorted(projects):
+                proj_df = filtered_df[filtered_df['project'] == proj]
+
+                # ✅ columns for display
+                cols_to_use = [c for c in required_cols if c in proj_df.columns]
+
+                segments = (
+                    proj_df[cols_to_use]
+                    .dropna(subset=['segmentcode'])
+                    .drop_duplicates()
+                )
+
+                with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
+                    if not segments.empty:
+
+                        display_lines = []
+
+                        for _, row in segments.iterrows():
+                            district = str(row.get("shire", ""))
+                            date = str(row.get("datetouse_dt", ""))
+                            circuit = str(row.get("segmentcode", ""))
+                            segment = str(row.get("segmentdesc", ""))
+
+                            line = f"{district} | {date} | {circuit} | {segment}"
+                            display_lines.append(line)
+
+                        # ✅ WIDER + SCROLLABLE DISPLAY BOX
+                        st.markdown(
+                            """
+                            <div style='
+                                max-height:300px;
+                                overflow-y:auto;
+                                padding:12px;
+                                border:1px solid #444;
+                                background-color:#111;
+                                font-family:monospace;
+                                font-size:14px;
+                                white-space:nowrap;
+                            '>
+                            """ + "<br>".join(display_lines) + "</div>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.write("No circuit data for this project.")
+
+    else:
+        st.info("Project column not found in the data.")
+
+# --------------------------------------------------
+# GLOBAL EXCEL DOWNLOAD BUTTON
+# --------------------------------------------------
+st.markdown("---")
+
+with center_col:
+    if 'filtered_df' in locals() and not filtered_df.empty:
+
+        # ✅ DEFINE EXPORT COLUMNS (MATCH DISPLAY)
+        export_columns = [
+            "shire",
+            "datetouse_dt",
+            "project",
+            "segmentcode",
+            "segmentdesc"
+        ]
+
+        export_df = filtered_df[[c for c in export_columns if c in filtered_df.columns]].copy()
+
+        excel_file = generate_excel_styled_multilevel(
+            export_df,
+            poles_df if 'poles_df' in locals() else None
+        )
+
+        st.download_button(
+            label="📥 High level planning & Poles Excel",
+            data=excel_file,
+            file_name=f"High_level_planning_{date_range_str}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+# --------------------------------------------------
+# OPTIONAL: PER-PROJECT CSV DOWNLOAD
+# --------------------------------------------------
+with center_col:
+    st.markdown("<h3>Download per project</h3>", unsafe_allow_html=True)
+
+    export_columns = [
+        "shire",
+        "datetouse_dt",
+        "project",
+        "segmentcode",
+        "segmentdesc"
+    ]
+    
+    for proj in sorted(filtered_df['project'].dropna().unique()):
+        proj_df = filtered_df[filtered_df['project'] == proj]
+
+        proj_export = proj_df[[c for c in export_columns if c in proj_df.columns]].copy()
+
+        csv = proj_export.to_csv(index=False).encode('utf-8')
+
+        st.download_button(
+            label=f"📥 Download {proj} circuits",
+            data=csv,
+            file_name=f"{proj}_circuits.csv",
+            mime="text/csv"
+        )
 
