@@ -192,8 +192,11 @@ def prepare_dataframe(df):
 
     if 'datetouse' in df.columns:
         df['datetouse_dt'] = pd.to_datetime(df['datetouse'], errors='coerce').dt.normalize()
+        df['datetouse_display'] = df['datetouse_dt'].dt.strftime("%d/%m/%Y")
+        df['datetouse_display'].fillna("Unplanned", inplace=True)
     else:
         df['datetouse_dt'] = pd.NaT
+        df['datetouse_display'] = "Unplanned"
 
     # Make numeric columns safe
     for col in ['total', 'orig']:
