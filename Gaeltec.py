@@ -1418,7 +1418,7 @@ with center_col:
     )
 
     # ✅ REQUIRED COLUMNS (UPDATED)
-    required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
+    required_cols = ['shire', 'datetouse_display', 'project', 'segmentcode', 'segmentdesc']
     existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
     if 'project' in existing_cols:
@@ -1446,7 +1446,7 @@ with center_col:
 
                         for _, row in segments.iterrows():
                             district = str(row.get("shire", ""))
-                            date = str(row.get("datetouse_dt", ""))
+                            date = str(row.get("datetouse_display", ""))
                             circuit = str(row.get("segmentcode", ""))
                             segment = str(row.get("segmentdesc", ""))
 
@@ -1486,7 +1486,7 @@ with center_col:
         # ✅ DEFINE EXPORT COLUMNS (MATCH DISPLAY)
         export_columns = [
             "shire",
-            "datetouse_dt",
+            "datetouse_display",
             "project",
             "segmentcode",
             "segmentdesc"
@@ -1514,7 +1514,7 @@ with center_col:
 
     export_columns = [
         "shire",
-        "datetouse_dt",
+        "datetouse_display",
         "project",
         "segmentcode",
         "segmentdesc"
