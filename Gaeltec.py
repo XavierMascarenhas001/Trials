@@ -1390,18 +1390,34 @@ def generate_excel_styled_multilevel(df, poles=None):
     output.seek(0)
     return output
 
-# --------------------------------------------------
-# CENTERED LAYOUT
-# --------------------------------------------------
-center_col = st.columns([1, 3, 1])[1]
 
+# --------------------------------------------------
+# PAGE / LAYOUT (WIDER DISPLAY)
+# --------------------------------------------------
+st.set_page_config(layout="wide")
+
+# Optional: make content visually wider
+st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            max-width: 95%;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --------------------------------------------------
+# DISPLAY SECTION
+# --------------------------------------------------
 with center_col:
     st.markdown(
         "<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>",
         unsafe_allow_html=True
     )
 
-    required_cols = ['project', 'segmentcode']
+    # ✅ REQUIRED COLUMNS (UPDATED)
+    required_cols = ['District', 'datetouse_dt', 'project', 'Circuit', 'segmentdesc']
     existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
     if 'project' in existing_cols:
@@ -1413,37 +1429,50 @@ with center_col:
             for proj in sorted(projects):
                 proj_df = filtered_df[filtered_df['project'] == proj]
 
-                # include segmentcode and sourcefile if available
-                cols_to_use = [c for c in ['segmentcode', 'sourcefile'] if c in proj_df.columns]
+                # ✅ columns for display
+                cols_to_use = [c for c in required_cols if c in proj_df.columns]
 
-                if cols_to_use:
-                    segments = proj_df[cols_to_use].dropna(subset=['segmentcode']).drop_duplicates()
-                else:
-                    segments = pd.DataFrame()
+                segments = (
+                    proj_df[cols_to_use]
+                    .dropna(subset=['Circuit'])
+                    .drop_duplicates()
+                )
 
                 with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
                     if not segments.empty:
-                        # Prepare display text
-                        display_lines = []
-                        for _, row in segments.iterrows():
-                            seg = str(row.get("segmentcode", ""))
-                            src = str(row.get("sourcefile", ""))
-                            if src:
-                                display_lines.append(f"{seg}  |  {src}")
-                            else:
-                                display_lines.append(seg)
 
+                        display_lines = []
+
+                        for _, row in segments.iterrows():
+                            district = str(row.get("District", ""))
+                            date = str(row.get("datetouse_dt", ""))
+                            circuit = str(row.get("Circuit", ""))
+                            segment = str(row.get("segmentdesc", ""))
+
+                            line = f"{district} | {date} | {circuit} | {segment}"
+                            display_lines.append(line)
+
+                        # ✅ WIDER + SCROLLABLE DISPLAY BOX
                         st.markdown(
-                            "<div style='max-height:200px; overflow-y:auto; padding:8px; border:1px solid #444; background-color:#111;'>"
-                            + "<br>".join(display_lines)
-                            + "</div>",
+                            """
+                            <div style='
+                                max-height:300px;
+                                overflow-y:auto;
+                                padding:12px;
+                                border:1px solid #444;
+                                background-color:#111;
+                                font-family:monospace;
+                                font-size:14px;
+                                white-space:nowrap;
+                            '>
+                            """ + "<br>".join(display_lines) + "</div>",
                             unsafe_allow_html=True
                         )
                     else:
-                        st.write("No circuit codes for this project.")
+                        st.write("No circuit data for this project.")
 
     else:
-        st.info("Project or Circuit not found in the data.")
+        st.info("Project column not found in the data.")
 
 # --------------------------------------------------
 # GLOBAL EXCEL DOWNLOAD BUTTON
@@ -1452,13 +1481,25 @@ st.markdown("---")
 
 with center_col:
     if 'filtered_df' in locals() and not filtered_df.empty:
+
+        # ✅ DEFINE EXPORT COLUMNS (MATCH DISPLAY)
+        export_columns = [
+            "District",
+            "datetouse_dt",
+            "project",
+            "Circuit",
+            "segmentdesc"
+        ]
+
+        export_df = filtered_df[[c for c in export_columns if c in filtered_df.columns]].copy()
+
         excel_file = generate_excel_styled_multilevel(
-            filtered_df,
+            export_df,
             poles_df if 'poles_df' in locals() else None
         )
 
         st.download_button(
-            label=f"📥 High level planning & Poles Excel",
+            label="📥 High level planning & Poles Excel",
             data=excel_file,
             file_name=f"High_level_planning_{date_range_str}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1469,14 +1510,25 @@ with center_col:
 # --------------------------------------------------
 with center_col:
     st.markdown("<h3>Download per project</h3>", unsafe_allow_html=True)
+
+    export_columns = [
+        "District",
+        "datetouse_dt",
+        "project",
+        "Circuit",
+        "segmentdesc"
+    ]
+
     for proj in sorted(filtered_df['project'].dropna().unique()):
         proj_df = filtered_df[filtered_df['project'] == proj]
-        csv = proj_df.to_csv(index=False).encode('utf-8')
+
+        proj_export = proj_df[[c for c in export_columns if c in proj_df.columns]].copy()
+
+        csv = proj_export.to_csv(index=False).encode('utf-8')
+
         st.download_button(
             label=f"📥 Download {proj} circuits",
             data=csv,
             file_name=f"{proj}_circuits.csv",
             mime="text/csv"
         )
-
-
