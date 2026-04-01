@@ -917,8 +917,9 @@ else:
             (filtered_df['datetouse_dt'] <= end)
         ]
         date_range_str = f"{start.strftime('%d/%m/%Y')} → {end.strftime('%d/%m/%Y')}"
+
+    filtered_df['datetouse_display'] = filtered_df['datetouse_dt'].dt.strftime("%d/%m/%Y")
         
-filtered_df['datetouse_display'] = filtered_df['datetouse_dt'].dt.strftime("%d/%m/%Y")
     # -------------------------------
     # --- Total & Variation Display ---
     # -------------------------------
