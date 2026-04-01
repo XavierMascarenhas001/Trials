@@ -1446,7 +1446,7 @@ with center_col:
     )
 
     # ✅ REQUIRED COLUMNS (UPDATED)
-    required_cols = ['shire', 'datetouse_display', 'project', 'segmentcode', 'segmentdesc']
+    required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
     existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
     if 'project' in existing_cols:
@@ -1474,7 +1474,11 @@ with center_col:
 
                         for _, row in segments.iterrows():
                             district = str(row.get("shire", ""))
-                            date = str(row.get("datetouse_display", ""))
+                            dt = row.get("datetouse_dt", None)
+                            if pd.notna(dt):
+                                date = dt.strftime("%d/%m/%Y")
+                            else:
+                                date = "Unplanned"
                             circuit = str(row.get("segmentcode", ""))
                             segment = str(row.get("segmentdesc", ""))
 
