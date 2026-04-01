@@ -1208,7 +1208,7 @@ for cat_name, keys, y_label in categories:
             Total=('pole', 'count'),
             Variation=('qvci_clean', 'sum')
         ).reset_index()
-    drilldown_dict[cat_name] = sub_df_unique.copy()
+        drilldown_dict[cat_name] = sub_df_unique.copy()
 
     else:
         bar_data = sub_df.groupby('mapped').agg(
@@ -1221,6 +1221,7 @@ for cat_name, keys, y_label in categories:
     bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
     bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
     bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
+    bar_data_dict[cat_name] = bar_data
 
     # Convert to miles if needed
     y_axis_label = y_label
@@ -1345,6 +1346,7 @@ cv7_poles = pd.concat([
 # FILTER CV8 POLES (EXCLUDE CV7)
 # -------------------------------
 cv8_df = filtered_df[~filtered_df['pole'].isin(cv7_poles)].copy()
+drilldown_dict["CV8"] = cv8_df.copy()
 
 # Optional: assign HV/LV type based on project or other logic
 cv8_df['CV8_type'] = cv8_df['project'].apply(
@@ -1358,7 +1360,6 @@ cv8_summary = cv8_df.groupby('CV8_type').agg(
     Total=('pole', 'nunique')
 ).reset_index()
 
-drilldown_dict["CV8"] = cv8_df.copy()
 
 # -------------------------------
 # PLOT CV8 BAR CHART
@@ -1557,7 +1558,7 @@ def generate_excel_export(display_columns, drilldown_dict, filtered_df):
     }
 
     # -------------------------------
-    # PROJECT SUMMARY
+    # SUMMARY
     # -------------------------------
     summary_rows = []
 
@@ -1594,15 +1595,13 @@ def generate_excel_export(display_columns, drilldown_dict, filtered_df):
     # -------------------------------
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
 
-        # 1️⃣ Summary first
         if not summary_df.empty:
             summary_df.to_excel(writer, sheet_name="Project_Summary", index=False)
 
-        # 2️⃣ Category sheets
         for name, df in all_data.items():
             df.to_excel(writer, sheet_name=sanitize_sheet_name(name), index=False)
 
-        # 3️⃣ Combined ALL filtered data
+        # ✅ FIXED Combined Data
         if filtered_df is not None and not filtered_df.empty:
             combined_df = prepare_df(filtered_df)
             combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
@@ -1613,11 +1612,7 @@ def generate_excel_export(display_columns, drilldown_dict, filtered_df):
 # DOWNLOAD BUTTON
 # -------------------------------
 if drilldown_dict:
-    excel_bytes = generate_excel_export(
-        display_columns,
-        drilldown_dict,
-        filtered_df
-    )
+    excel_bytes = generate_excel_export(display_columns, drilldown_dict, filtered_df)
 
     st.download_button(
         label="📥 Export All Data to Excel",
