@@ -1208,20 +1208,17 @@ for cat_name, keys, y_label in categories:
             Total=('pole', 'count'),
             Variation=('qvci_clean', 'sum')
         ).reset_index()
-        drilldown_dict[cat_name] = sub_df_unique.copy()
 
     else:
         bar_data = sub_df.groupby('mapped').agg(
             Total=('adj_value', 'sum'),
             Variation=('qvci_clean', 'sum')
         ).reset_index()
-        drilldown_dict[cat_name] = sub_df.copy()
         
 
     bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
     bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
     bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
-    bar_data_dict[cat_name] = bar_data
 
     # Convert to miles if needed
     y_axis_label = y_label
@@ -1346,7 +1343,6 @@ cv7_poles = pd.concat([
 # FILTER CV8 POLES (EXCLUDE CV7)
 # -------------------------------
 cv8_df = filtered_df[~filtered_df['pole'].isin(cv7_poles)].copy()
-drilldown_dict["CV8"] = cv8_df.copy()
 
 # Optional: assign HV/LV type based on project or other logic
 cv8_df['CV8_type'] = cv8_df['project'].apply(
@@ -1540,10 +1536,13 @@ display_columns = [
     'shire', 'project', 'segmentcode', 'segmentdesc', 'comment',
     'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done', 'item'
 ]
-def generate_excel_export(display_columns, drilldown_dict, filtered_df):
+def generate_excel_export(display_columns, drilldown_dict, cv8_df):
 
     output = io.BytesIO()
 
+    # -----------------------------
+    # Helper: enforce display columns
+    # -----------------------------
     def prepare_df(df):
         df = df.copy()
         for col in display_columns:
@@ -1551,33 +1550,43 @@ def generate_excel_export(display_columns, drilldown_dict, filtered_df):
                 df[col] = ""
         return df[display_columns].fillna("")
 
-    all_data = {
-        name: prepare_df(df)
-        for name, df in drilldown_dict.items()
-        if not df.empty
-    }
+    # -----------------------------
+    # Combine all datasets
+    # -----------------------------
+    all_data = {}
 
-    # -------------------------------
-    # SUMMARY
-    # -------------------------------
+    # CV7 + others
+    for name, df in drilldown_dict.items():
+        if not df.empty:
+            all_data[name] = prepare_df(df)
+
+    # CV8
+    if cv8_df is not None and not cv8_df.empty:
+        all_data["CV8"] = prepare_df(cv8_df)
+
+    # -----------------------------
+    # Build Project Summary
+    # -----------------------------
     summary_rows = []
 
     if all_data:
-        projects = pd.concat(
+        all_projects = pd.concat(
             [df[['project']] for df in all_data.values()],
             ignore_index=True
         )['project'].dropna().unique()
 
-        for project in projects:
+        for project in all_projects:
             row = {"project": project}
             total_qsub = 0
             total_qvci = 0
 
             for name, df in all_data.items():
+
                 proj_df = df[df['project'] == project]
 
-                qsub = pd.to_numeric(proj_df['qsub'], errors='coerce').fillna(0).sum()
-                qvci = pd.to_numeric(proj_df['qvci'], errors='coerce').fillna(0).sum()
+                # Ensure numeric
+                qsub = pd.to_numeric(proj_df.get('qsub', 0), errors='coerce').fillna(0).sum()
+                qvci = pd.to_numeric(proj_df.get('qvci', 0), errors='coerce').fillna(0).sum()
 
                 row[name] = qsub
                 total_qsub += qsub
@@ -1588,35 +1597,44 @@ def generate_excel_export(display_columns, drilldown_dict, filtered_df):
 
             summary_rows.append(row)
 
-    summary_df = pd.DataFrame(summary_rows)
+        summary_df = pd.DataFrame(summary_rows)
+    else:
+        summary_df = pd.DataFrame()
 
-    # -------------------------------
-    # WRITE EXCEL
-    # -------------------------------
+    # -----------------------------
+    # Write Excel
+    # -----------------------------
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
 
+        # 1️⃣ Project Summary FIRST
         if not summary_df.empty:
             summary_df.to_excel(writer, sheet_name="Project_Summary", index=False)
 
+        # 2️⃣ Individual sheets
         for name, df in all_data.items():
-            df.to_excel(writer, sheet_name=sanitize_sheet_name(name), index=False)
+            sheet_name = sanitize_sheet_name(name)
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # ✅ FIXED Combined Data
-        if filtered_df is not None and not filtered_df.empty:
-            combined_df = prepare_df(filtered_df)
+        # 3️⃣ Combined data LAST
+        if all_data:
+            combined_df = pd.concat(all_data.values(), ignore_index=True)
             combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
 
     return output.getvalue()
-
 # -------------------------------
 # DOWNLOAD BUTTON
 # -------------------------------
-if drilldown_dict:
-    excel_bytes = generate_excel_export(display_columns, drilldown_dict, filtered_df)
+if drilldown_dict or not cv8_df.empty:
+
+    excel_bytes = generate_excel_export(
+        display_columns,
+        drilldown_dict,
+        cv8_df
+    )
 
     st.download_button(
         label="📥 Export All Data to Excel",
         data=excel_bytes,
-        file_name="Planning_Export.xlsx",
+        file_name=f"Planning_Export_{date_range_str}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
