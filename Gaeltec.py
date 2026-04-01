@@ -1516,42 +1516,52 @@ if 'bar_data_dict' not in locals():
 if 'drilldown_dict' not in locals():
     drilldown_dict = {}
 
-def generate_excel_export(bar_data_dict, drilldown_dict):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # --- 1️⃣ Bar chart sheets ---
-        for cat_name, bar_df in bar_data_dict.items():
-            if isinstance(bar_df, pd.DataFrame) and not bar_df.empty:
-                sheet_name = cat_name[:31]  # Excel sheet name limit
-                bar_df.to_excel(writer, sheet_name=sheet_name, index=False)
+bar_data_dict = {}       # Stores the summary bar chart data per category
+drilldown_dict = {}      # Stores the full drill-down table per category
 
-        # --- 2️⃣ Drill-down combined sheet ---
-        drilldown_combined = pd.DataFrame()
-        for cat_name, display_df in drilldown_dict.items():
-            if isinstance(display_df, pd.DataFrame) and not display_df.empty:
-                df_copy = display_df.copy()
-                df_copy.insert(0, "Category", cat_name)
-                drilldown_combined = pd.concat([drilldown_combined, df_copy], ignore_index=True)
-        if not drilldown_combined.empty:
-            drilldown_combined.to_excel(writer, sheet_name="Drill-down Data", index=False)
+categories_to_process = categories + [("CV8 Unique Poles", cv8_summary, "Unique Poles")]
 
-        # --- 3️⃣ Project summary sheet ---
-        summary_df = pd.DataFrame()
-        for cat_name, bar_df in bar_data_dict.items():
-            if isinstance(bar_df, pd.DataFrame) and 'Mapped' in bar_df.columns and 'Total' in bar_df.columns:
-                temp = bar_df.groupby('Mapped')['Total'].sum().reset_index()
-                temp.rename(columns={'Mapped': 'Project', 'Total': f"{cat_name}_Total"}, inplace=True)
-                if summary_df.empty:
-                    summary_df = temp
-                else:
-                    summary_df = pd.merge(summary_df, temp, how='outer', on='Project')
-        if not summary_df.empty:
-            total_cols = [c for c in summary_df.columns if "_Total" in c]
-            summary_df['Grand_Total'] = summary_df[total_cols].sum(axis=1)
-            summary_df.to_excel(writer, sheet_name="Project Summary", index=False)
+for cat_name, keys_or_df, y_label in categories_to_process:
+    
+    # Handle CV8 differently because we already have cv8_summary DataFrame
+    if cat_name == "CV8 Unique Poles":
+        bar_df = keys_or_df.copy()
+        drilldown_df = cv8_df.drop_duplicates(subset=['pole'])
+    else:
+        # Prepare mask to select relevant items for this category
+        pattern = '|'.join([re.escape(k) for k in keys_or_df.keys()])
+        mask = filtered_df['item'].astype(str).str.contains(pattern, case=False, na=False)
+        sub_df = filtered_df[mask].copy()
 
-    # No writer.save() here — the context manager handles it
-    return output.getvalue()
+        # --- Deduplicate poles for CV31 ---
+        if cat_name == "CV31":
+            sub_df = sub_df.drop_duplicates(subset=['pole'])
+
+        # --- Adjust numeric values ---
+        sub_df['qvci_clean'] = pd.to_numeric(sub_df.get('qvci', 0), errors='coerce').fillna(0)
+        sub_df['qsub_clean'] = pd.to_numeric(sub_df.get('qsub', 0), errors='coerce').fillna(0)
+        sub_df['multiplier'] = 1
+        sub_df.loc[sub_df["item"].isin(erect_h_items), "multiplier"] = 2
+        sub_df.loc[sub_df["item"].isin(recover_h_items), "multiplier"] = 2
+        sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
+
+        # --- Aggregate ---
+        if cat_name == "CV31":
+            bar_df = sub_df.groupby('mapped').agg(
+                Total=('pole', 'count'),
+                Variation=('qvci_clean', 'sum')
+            ).reset_index()
+        else:
+            bar_df = sub_df.groupby('mapped').agg(
+                Total=('adj_value', 'sum'),
+                Variation=('qvci_clean', 'sum')
+            ).reset_index()
+
+        drilldown_df = sub_df.copy()
+
+    # Store for Excel export
+    bar_data_dict[cat_name] = bar_df
+    drilldown_dict[cat_name] = drilldown_df
 # -------------------------------
 # 4️⃣ Download button
 # -------------------------------
