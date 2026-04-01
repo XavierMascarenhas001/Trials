@@ -1342,8 +1342,8 @@ cv8_df['CV8_type'] = cv8_df['CV8_type'].map({
 # ==================================================
 
 cv8_bar = cv8_df.groupby('CV8_type').agg(
-    Total=('qsub_clean', 'sum'),
-    Variation=('qvci_clean', 'sum')
+    Total=('pole', 'nunique'),       # ✅ COUNT UNIQUE POLES
+    Variation=('qvci_clean', 'sum')  # Keep variation if needed
 ).reset_index()
 
 cv8_bar['PositiveVar'] = cv8_bar['Variation'].clip(lower=0)
