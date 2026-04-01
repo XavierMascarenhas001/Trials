@@ -1155,11 +1155,23 @@ for cat_name, keys, y_label in categories:
 
         selected_rows = sub_df[sub_df['mapped'] == selected_mapping].copy()
         selected_rows.columns = selected_rows.columns.str.strip().str.lower()
-        extra_cols = ['poling team','team_name','shire','project','projectmanager','segmentcode','segmentdesc','material_code','pid_ohl_nr','sourcefile']
-        extra_cols = [c for c in extra_cols if c in selected_rows.columns]
+        display_columns = [
+            'shire', 'project', 'segmentdesc', 'item', 'comment',
+            'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done'
+        ]
+        display_columns = [c for c in display_columns if c in selected_rows.columns]
+        display_df = selected_rows[display_columns].copy()
+        display_df.rename(columns={
+            'shire': 'District',
+            'segmentdesc': 'Segment',
+            'qty': 'Quantity',
+            'qsub': 'Quantity Used'
+        }, inplace=True)
+        st.write(f"**Total records:** {len(display_df)}")
 
         # Display table
         st.write("🔹 Information Resumed:")
+        st.dataframe(display_df, use_container_width=True)
         if not selected_rows.empty:
             st.dataframe(selected_rows, use_container_width=True)
             st.write(f"**Total records:** {len(selected_rows)}")
