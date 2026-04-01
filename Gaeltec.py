@@ -1430,7 +1430,7 @@ st.markdown("""
         .block-container {
             padding-top: 1rem;
             padding-bottom: 1rem;
-            max-width: 95%;
+            max-width: 100%;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -1538,31 +1538,4 @@ with center_col:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-# --------------------------------------------------
-# OPTIONAL: PER-PROJECT CSV DOWNLOAD
-# --------------------------------------------------
-with center_col:
-    st.markdown("<h3>Download per project</h3>", unsafe_allow_html=True)
-
-    export_columns = [
-        "shire",
-        "datetouse_display",
-        "project",
-        "segmentcode",
-        "segmentdesc"
-    ]
-    
-    for proj in sorted(filtered_df['project'].dropna().unique()):
-        proj_df = filtered_df[filtered_df['project'] == proj]
-
-        proj_export = proj_df[[c for c in export_columns if c in proj_df.columns]].copy()
-
-        csv = proj_export.to_csv(index=False).encode('utf-8')
-
-        st.download_button(
-            label=f"📥 Download {proj} circuits",
-            data=csv,
-            file_name=f"{proj}_circuits.csv",
-            mime="text/csv"
-        )
 
