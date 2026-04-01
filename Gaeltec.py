@@ -1510,12 +1510,6 @@ with center_col:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-# Ensure the dictionaries exist
-if 'bar_data_dict' not in locals():
-    bar_data_dict = {}
-if 'drilldown_dict' not in locals():
-    drilldown_dict = {}
-
 bar_data_dict = {}       # Stores the summary bar chart data per category
 drilldown_dict = {}      # Stores the full drill-down table per category
 
@@ -1523,29 +1517,32 @@ categories_to_process = categories + [("CV8 Unique Poles", cv8_summary, "Unique 
 
 for cat_name, keys_or_df, y_label in categories_to_process:
     
-    # Handle CV8 differently because we already have cv8_summary DataFrame
     if cat_name == "CV8 Unique Poles":
         bar_df = keys_or_df.copy()
         drilldown_df = cv8_df.drop_duplicates(subset=['pole'])
     else:
-        # Prepare mask to select relevant items for this category
         pattern = '|'.join([re.escape(k) for k in keys_or_df.keys()])
         mask = filtered_df['item'].astype(str).str.contains(pattern, case=False, na=False)
         sub_df = filtered_df[mask].copy()
 
-        # --- Deduplicate poles for CV31 ---
         if cat_name == "CV31":
             sub_df = sub_df.drop_duplicates(subset=['pole'])
 
-        # --- Adjust numeric values ---
-        sub_df['qvci_clean'] = pd.to_numeric(sub_df.get('qvci', 0), errors='coerce').fillna(0)
-        sub_df['qsub_clean'] = pd.to_numeric(sub_df.get('qsub', 0), errors='coerce').fillna(0)
+        # --- Safe numeric conversion ---
+        sub_df['qvci_clean'] = pd.to_numeric(
+            sub_df['qvci'] if 'qvci' in sub_df.columns else pd.Series(0, index=sub_df.index),
+            errors='coerce'
+        ).fillna(0)
+        sub_df['qsub_clean'] = pd.to_numeric(
+            sub_df['qsub'] if 'qsub' in sub_df.columns else pd.Series(0, index=sub_df.index),
+            errors='coerce'
+        ).fillna(0)
+
         sub_df['multiplier'] = 1
         sub_df.loc[sub_df["item"].isin(erect_h_items), "multiplier"] = 2
         sub_df.loc[sub_df["item"].isin(recover_h_items), "multiplier"] = 2
         sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
 
-        # --- Aggregate ---
         if cat_name == "CV31":
             bar_df = sub_df.groupby('mapped').agg(
                 Total=('pole', 'count'),
@@ -1559,7 +1556,6 @@ for cat_name, keys_or_df, y_label in categories_to_process:
 
         drilldown_df = sub_df.copy()
 
-    # Store for Excel export
     bar_data_dict[cat_name] = bar_df
     drilldown_dict[cat_name] = drilldown_df
 # -------------------------------
