@@ -39,25 +39,34 @@ st.set_page_config(
 
 def preprocess_df(df, date_column='datetouse', numeric_cols=['total','orig']):
     df = df.copy()
-
-    # Clean column names
     df.columns = df.columns.str.strip().str.lower()
 
-    # ---- DATE HANDLING ----
-    df[date_column + '_dt'] = pd.to_datetime(
-        df.get(date_column),
-        errors='coerce'
-    )
+    # ---- DATE ----
+    if date_column in df.columns:
+        df[date_column + '_dt'] = pd.to_datetime(
+            df[date_column],
+            errors='coerce',
+            dayfirst=True   # ✅ FIX
+        )
 
-    # Pure date (NO TIME) → best for Excel
-    df[date_column + '_date'] = df[date_column + '_dt'].dt.date
+        # Keep datetime for logic
+        df[date_column + '_dt'] = df[date_column + '_dt'].dt.normalize()
 
-    # Display string (for dashboard)
-    df[date_column + '_display'] = df[date_column + '_dt'].dt.strftime("%d/%m/%Y")
+        # Date only (for Excel)
+        df[date_column + '_date'] = df[date_column + '_dt'].dt.date
+
+        # Display string (for UI)
+        df[date_column + '_display'] = df[date_column + '_dt'].dt.strftime("%d/%m/%Y")
+
+    else:
+        print(f"⚠️ Column '{date_column}' not found")
+        df[date_column + '_dt'] = pd.NaT
+        df[date_column + '_date'] = None
+        df[date_column + '_display'] = "Unplanned"
 
     df[date_column + '_display'].fillna("Unplanned", inplace=True)
 
-    # ---- NUMERIC CLEAN ----
+    # ---- NUMERIC ----
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(
@@ -1464,7 +1473,7 @@ with center_col:
 
                         for _, row in segments.iterrows():
                             district = str(row.get("shire", ""))
-                            date = str(row.get("datetouse_date", ""))
+                            date = str(row.get("datetouse_display", ""))
                             circuit = str(row.get("segmentcode", ""))
                             segment = str(row.get("segmentdesc", ""))
 
