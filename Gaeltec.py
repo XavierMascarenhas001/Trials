@@ -1195,6 +1195,20 @@ for cat_name, keys, y_label in categories:
     sub_df.loc[sub_df["item"].isin(recover_h_items), "multiplier"] = 2
     sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
 
+    # --- Aggregate ---
+    if cat_name == "CV31":
+        # Deduplicate poles first
+        sub_df_unique_poles = sub_df.drop_duplicates(subset=['pole'])
+        bar_data = sub_df_unique_poles.groupby('mapped').agg(
+            Total=('pole', 'count'),
+            Variation=('qvci_clean', 'sum')
+        ).reset_index()
+    else:
+        bar_data = sub_df.groupby('mapped').agg(
+            Total=('adj_value', 'sum'),
+            Variation=('qvci_clean', 'sum')
+        ).reset_index()
+        
     # Aggregate
     bar_data = sub_df.groupby('mapped').agg(
         Total=('adj_value', 'sum'),
