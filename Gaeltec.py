@@ -1534,67 +1534,99 @@ display_columns = [
     'shire', 'project', 'segmentcode', 'segmentdesc', 'comment',
     'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done', 'item'
 ]
-def generate_excel_export(display_columns, bar_data_dict, drilldown_dict, cv8_df):
-    """
-    Generates Excel file:
-    1️⃣ Project_Summary (aggregated sum of qsub per sheet/project)
-    2️⃣ Individual sheets (bar_data + drill-down) using display_columns
-    3️⃣ Combined_Data sheet
-    """
+def generate_excel_export(display_columns, drilldown_dict, cv8_df):
+
     output = io.BytesIO()
 
-    all_sheets = {**bar_data_dict, **drilldown_dict, "CV8": cv8_df}
-
-    # Fill missing display columns in all sheets
-    def fill_display_columns(df):
+    # -----------------------------
+    # Helper: enforce display columns
+    # -----------------------------
+    def prepare_df(df):
+        df = df.copy()
         for col in display_columns:
             if col not in df.columns:
                 df[col] = ""
-        return df[display_columns].copy()
+        return df[display_columns].fillna("")
 
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    # -----------------------------
+    # Combine all datasets
+    # -----------------------------
+    all_data = {}
 
-        # --- 1️⃣ Individual sheets ---
-        for sheet_name, df in all_sheets.items():
-            if df.empty:
-                continue
-            df_to_export = fill_display_columns(df)
-            writer_df_name = sanitize_sheet_name(sheet_name)
-            df_to_export.to_excel(writer, sheet_name=writer_df_name, index=False)
+    # CV7 + others
+    for name, df in drilldown_dict.items():
+        if not df.empty:
+            all_data[name] = prepare_df(df)
 
-        # --- 2️⃣ Project Summary sheet ---
-        projects = pd.concat([df[['project', 'qsub']] for df in all_sheets.values() if 'project' in df.columns], ignore_index=True)['project'].dropna().unique()
-        summary_rows = []
+    # CV8
+    if cv8_df is not None and not cv8_df.empty:
+        all_data["CV8"] = prepare_df(cv8_df)
 
-        for project in projects:
-            row = {'project': project}
-            total_sum = 0
-            for sheet_name, df in all_sheets.items():
-                if 'project' in df.columns and 'qsub' in df.columns:
-                    val = df[df['project'] == project]['qsub'].sum()
-                    row[sheet_name] = val
-                    total_sum += val
-                else:
-                    row[sheet_name] = 0
-            row['Total'] = total_sum
-            row['Original'] = total_sum  # You can change logic if Original is different
+    # -----------------------------
+    # Build Project Summary
+    # -----------------------------
+    summary_rows = []
+
+    if all_data:
+        all_projects = pd.concat(
+            [df[['project']] for df in all_data.values()],
+            ignore_index=True
+        )['project'].dropna().unique()
+
+        for project in all_projects:
+            row = {"project": project}
+            total_qsub = 0
+            total_qvci = 0
+
+            for name, df in all_data.items():
+
+                proj_df = df[df['project'] == project]
+
+                # Ensure numeric
+                qsub = pd.to_numeric(proj_df.get('qsub', 0), errors='coerce').fillna(0).sum()
+                qvci = pd.to_numeric(proj_df.get('qvci', 0), errors='coerce').fillna(0).sum()
+
+                row[name] = qsub
+                total_qsub += qsub
+                total_qvci += qvci
+
+            row["Total"] = total_qsub
+            row["Original"] = total_qvci
+
             summary_rows.append(row)
 
         summary_df = pd.DataFrame(summary_rows)
-        # Ensure Project_Summary is first sheet
-        summary_df.to_excel(writer, sheet_name="Project_Summary", index=False)
+    else:
+        summary_df = pd.DataFrame()
 
-        # --- 3️⃣ Combined Data sheet ---
-        combined_df = pd.concat([fill_display_columns(df) for df in all_sheets.values()], ignore_index=True)
-        combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
+    # -----------------------------
+    # Write Excel
+    # -----------------------------
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+
+        # 1️⃣ Project Summary FIRST
+        if not summary_df.empty:
+            summary_df.to_excel(writer, sheet_name="Project_Summary", index=False)
+
+        # 2️⃣ Individual sheets
+        for name, df in all_data.items():
+            sheet_name = sanitize_sheet_name(name)
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        # 3️⃣ Combined data LAST
+        if all_data:
+            combined_df = pd.concat(all_data.values(), ignore_index=True)
+            combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
 
     return output.getvalue()
+✅ Updated button (IMPORTANT)
+if drilldown_dict or not cv8_df.empty:
 
-# -------------------
-# DOWNLOAD BUTTON
-# -------------------
-if bar_data_dict or drilldown_dict or not cv8_df.empty:
-    excel_bytes = generate_excel_export(display_columns, bar_data_dict, drilldown_dict, cv8_df)
+    excel_bytes = generate_excel_export(
+        display_columns,
+        drilldown_dict,
+        cv8_df
+    )
 
     st.download_button(
         label="📥 Export All Data to Excel",
