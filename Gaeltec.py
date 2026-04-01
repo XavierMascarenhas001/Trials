@@ -512,27 +512,22 @@ def generate_excel_styled_multilevel(filtered_df, poles_df=None):
 # --------------------------------------------------
 # FUNCTION: GENERATE EXCEL FILE
 # --------------------------------------------------
+def safe_excel_write(writer, df, sheet_name, dummy_text="No data available"):
+    """Write a DataFrame safely to Excel, ensuring at least one visible row."""
+    if df is None or df.empty:
+        df = pd.DataFrame({"Info": [dummy_text]})
+    df.to_excel(writer, sheet_name=sheet_name[:31], index=False, startrow=1, na_rep="")
+    
 def generate_excel_safe(export_df, poles_df=None):
-    """
-    Generate an Excel file safely, ensuring at least one visible sheet.
-    export_df: main DataFrame
-    poles_df: optional poles DataFrame
-    """
     buffer = BytesIO()
-
-    def safe_to_excel(writer, df, sheet_name):
-        """Write DataFrame to Excel safely, adding a dummy row if empty"""
-        if df is None or df.empty:
-            df = pd.DataFrame({"Info": ["No data available"]})
-        df.to_excel(writer, sheet_name=sheet_name[:31], index=False, startrow=1, na_rep="")
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         # Main sheet
-        safe_to_excel(writer, export_df, "HighLevel")
+        safe_excel_write(writer, export_df, "HighLevel")
 
         # Optional poles sheet
         if poles_df is not None:
-            safe_to_excel(writer, poles_df, "Poles")
+            safe_excel_write(writer, poles_df, "Poles", dummy_text="No poles data")
 
     buffer.seek(0)
     return buffer
