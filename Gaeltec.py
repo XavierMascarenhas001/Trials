@@ -1510,12 +1510,20 @@ with center_col:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-def generate_excel_export(bar_data_dict, drilldown_dict):
+def sanitize_sheet_name(name: str) -> str:
+    """Clean sheet names for Excel (max 31 chars, no invalid chars)."""
+    name = str(name)
+    name = re.sub(r'[:\\/*?\[\]\n\r]', '_', name)
+    name = re.sub(r'[^\x00-\x7F]', '_', name)
+    return name[:31]
+
+def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
     """
     Generates an Excel file in memory with:
     - One sheet per bar chart (summary)
     - One sheet per drill-down table
-    - One sheet with overall summary by project
+    - One sheet with all combined filtered data
+    - One sheet summarizing totals by project
     """
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -1534,29 +1542,40 @@ def generate_excel_export(bar_data_dict, drilldown_dict):
             sheet_name = sanitize_sheet_name(f"{cat_name}_details")
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # --- 3️⃣ Summary by project ---
-        # Combine all drill-downs to get project-level summary
-        combined_df = pd.concat(drilldown_dict.values(), ignore_index=True)
-        if 'project' in combined_df.columns:
-            project_summary = (
-                combined_df
-                .groupby('project', as_index=False)
-                .agg(
-                    Total_Poles=('pole', 'nunique'),
-                    Total_Quantity=('qty', 'sum')
-                )
-            )
-            project_summary.to_excel(writer, sheet_name='Project_Summary', index=False)
+        # --- 3️⃣ Combined sheet ---
+        if not filtered_df.empty:
+            combined_sheet_name = "Combined_Data"
+            filtered_df.to_excel(writer, sheet_name=combined_sheet_name, index=False)
+
+        # --- 4️⃣ Project summary sheet ---
+        if 'project' in filtered_df.columns:
+            # Sum numeric columns per project
+            numeric_cols = filtered_df.select_dtypes(include='number').columns.tolist()
+            if numeric_cols:
+                project_summary = filtered_df.groupby('project', as_index=False)[numeric_cols].sum()
+                project_summary.to_excel(writer, sheet_name="Project_Summary", index=False)
 
         writer.save()
         excel_data = output.getvalue()
-    return excel_data
-# Prepare your bar data and drill-downs as we discussed
-excel_bytes = generate_excel_export(bar_data_dict, drilldown_dict)
 
-st.download_button(
-    label="📥 Export Excel",
-    data=excel_bytes,
-    file_name=f"Planning_Export_{date_range_str}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+    return excel_data
+
+# ------------------------------
+# Example usage in Streamlit
+# ------------------------------
+
+# Prepare dictionaries for bar chart data and drill-downs
+# Example: { 'CV7_erect': bar_data_df, ... }
+bar_data_dict = {}       # Fill with your bar_data DataFrames
+drilldown_dict = {}      # Fill with your drilldown DataFrames
+
+# Only show button if we have data
+if bar_data_dict or drilldown_dict:
+    excel_bytes = generate_excel_export(bar_data_dict, drilldown_dict, filtered_df)
+
+    st.download_button(
+        label="📥 Export All Data to Excel",
+        data=excel_bytes,
+        file_name=f"Planning_Export_{date_range_str}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
