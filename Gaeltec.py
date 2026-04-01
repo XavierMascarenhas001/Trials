@@ -856,25 +856,36 @@ selected_team, filtered_df = multiselect_filter(filtered_df, 'team_name', "Selec
 # -------------------------------
 # Date Filter
 # -------------------------------
+# -------------------------------
+# --- Standardize Date Column ---
+# -------------------------------
+# Convert any existing datetime column to just date (no hours/minutes/seconds)
+if 'datetouse' in filtered_df.columns:
+    filtered_df['datetouse_dt'] = pd.to_datetime(filtered_df['datetouse'], errors='coerce').dt.normalize()
+    # For display purposes in tables, charts, etc.
+    filtered_df['datetouse_display'] = filtered_df['datetouse_dt'].dt.strftime("%d/%m/%Y")
+else:
+    filtered_df['datetouse_dt'] = pd.NaT
+    filtered_df['datetouse_display'] = "Unplanned"
+
+
 filter_type = st.sidebar.selectbox(
     "Filter by Date",
     ["Single Day", "Week", "Month", "Year", "Custom Range", "Unplanned"]
 )
 
 date_range_str = ""
-filtered_df['datetouse_dt'] = pd.to_datetime(filtered_df['datetouse_dt'])
-
 if filter_type == "Unplanned":
     filtered_df = filtered_df[filtered_df['datetouse_dt'].isna()]
     date_range_str = "Unplanned"
-
 else:
     filtered_df = filtered_df[filtered_df['datetouse_dt'].notna()]
 
     if filter_type == "Single Day":
         d = st.sidebar.date_input("Select date")
-        filtered_df = filtered_df[filtered_df['datetouse_dt'] == pd.Timestamp(d)]
-        date_range_str = str(d)
+        d_ts = pd.Timestamp(d)
+        filtered_df = filtered_df[filtered_df['datetouse_dt'] == d_ts]
+        date_range_str = d.strftime("%d/%m/%Y")
 
     elif filter_type == "Week":
         start = pd.Timestamp(st.sidebar.date_input("Week start"))
@@ -883,7 +894,7 @@ else:
             (filtered_df['datetouse_dt'] >= start) &
             (filtered_df['datetouse_dt'] <= end)
         ]
-        date_range_str = f"{start} → {end}"
+        date_range_str = f"{start.strftime('%d/%m/%Y')} → {end.strftime('%d/%m/%Y')}"
 
     elif filter_type == "Month":
         d = st.sidebar.date_input("Pick any date in month")
@@ -905,7 +916,7 @@ else:
             (filtered_df['datetouse_dt'] >= start) &
             (filtered_df['datetouse_dt'] <= end)
         ]
-        date_range_str = f"{start} → {end}"
+        date_range_str = f"{start.strftime('%d/%m/%Y')} → {end.strftime('%d/%m/%Y')}"
 
     # -------------------------------
     # --- Total & Variation Display ---
@@ -1052,9 +1063,11 @@ for cat_name, keys, y_label in categories:
     mask = filtered_df['item'].astype(str).str.contains(pattern, case=False, na=False)
     sub_df = filtered_df[mask]
 
-    if sub_df.empty:
-        st.info(f"No data found for {cat_name}")
-        continue
+    # --- Normalize dates in sub_df ---
+    if 'datetouse_dt' in sub_df.columns:
+        sub_df['datetouse_display'] = sub_df['datetouse_dt'].dt.strftime("%d/%m/%Y")
+    else:
+        sub_df['datetouse_display'] = "Unplanned"
 
     # Clean numeric columns
     sub_df['qvci_clean'] = pd.to_numeric(sub_df['qvci'] if 'qvci' in sub_df.columns else pd.Series(0, index=sub_df.index), errors='coerce').fillna(0)
@@ -1534,10 +1547,3 @@ if filtered_df is not None and not filtered_df.empty:
 
 else:
     st.info("No data available for Excel export.")
-
-
-
-
-
-
-
