@@ -1349,9 +1349,9 @@ for col in date_cols:
     if col in cv8_df.columns:
         cv8_df[col + '_display'] = pd.to_datetime(
             cv8_df[col], errors='coerce'
-        ).dt.strftime("%d/%m/%Y").fillna("Unplanned")
+        ).dt.strftime("%d/%m/%Y").fillna("Missing")
     else:
-        cv8_df[col + '_display'] = "Unplanned"
+        cv8_df[col + '_display'] = "Missing"
 
 # -------------------------------
 # CV8 DRILL-DOWN TABLE
