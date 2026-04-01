@@ -1317,7 +1317,6 @@ with center_col:
 # -------------------------------
 # ---- Full Excel Export ----
 # -------------------------------
-if filtered_df is not None and not filtered_df.empty:
     buffer_agg = BytesIO()
 
     with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
