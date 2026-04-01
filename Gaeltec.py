@@ -1379,6 +1379,7 @@ for cat_name, keys, y_label in categories:
 # -------------------------------
 # CV8 SPECIAL LOGIC
 # -------------------------------
+
 # Collect poles already counted in CV7
 cv7_poles = pd.concat([
     filtered_df[filtered_df['item'].isin(cat.keys())]['pole']
@@ -1394,19 +1395,46 @@ cv8_df['CV8_type'] = cv8_df['project'].apply(
     lambda x: 'CV8_LV' if 'LV' in str(x).upper() else 'CV8_HV'
 )
 
-# Ensure numeric columns
-cv8_df['qvci_clean'] = pd.to_numeric(cv8_df.get('qvci', pd.Series(0, index=cv8_df.index)), errors='coerce').fillna(0)
+# Ensure numeric column exists
+cv8_df['qvci_clean'] = pd.to_numeric(
+    cv8_df.get('qvci', pd.Series(0, index=cv8_df.index)),
+    errors='coerce'
+).fillna(0)
 
 # Aggregate CV8: count unique poles
 cv8_bar = cv8_df.groupby('CV8_type').agg(
-    Total=('pole', 'nunique'),
+    Total=('pole', 'nunique'),  # count unique poles
     Variation=('qvci_clean', 'sum')
 ).reset_index()
+
 cv8_bar['PositiveVar'] = cv8_bar['Variation'].clip(lower=0)
 cv8_bar['NegativeVar'] = cv8_bar['Variation'].clip(upper=0)
 
-plot_bar_chart(cv8_bar, "CV8", y_label="Unique Poles")
-
+# Plot CV8 bar chart
+fig = go.Figure()
+fig.add_bar(
+    x=cv8_bar['CV8_type'], y=cv8_bar['Total'],
+    name="Unique Poles", marker_color="#4C78A8", text=cv8_bar['Total'],
+    texttemplate='%{y}', textposition='outside'
+)
+fig.add_bar(
+    x=cv8_bar['CV8_type'], y=cv8_bar['PositiveVar'],
+    name="Positive Variation", marker_color="green"
+)
+fig.add_bar(
+    x=cv8_bar['CV8_type'], y=cv8_bar['NegativeVar'],
+    name="Negative Variation", marker_color="red"
+)
+fig.update_layout(
+    barmode='relative',
+    title="CV8 Overview",
+    xaxis_title="CV8 Type",
+    yaxis_title="Unique Poles",
+    plot_bgcolor='rgba(0,0,0,0)',
+    paper_bgcolor='rgba(0,0,0,0)',
+    yaxis=dict(gridcolor='rgba(255,255,255,0.3)')
+)
+st.plotly_chart(fig, use_container_width=True, height=500)
 
 # -------------------------------
 # CV8 Drill-down Table
