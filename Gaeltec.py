@@ -1208,7 +1208,7 @@ for cat_name, keys, y_label in categories:
             Total=('pole', 'count'),
             Variation=('qvci_clean', 'sum')
         ).reset_index()
-        drilldown_dict[cat_name] = sub_df_unique.copy()
+    drilldown_dict[cat_name] = sub_df_unique.copy()
 
     else:
         bar_data = sub_df.groupby('mapped').agg(
