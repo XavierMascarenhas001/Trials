@@ -37,43 +37,34 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-def preprocess_df(df, date_column='datetouse', numeric_cols=['total','orig']):
+def prepare_dataframe(df):
     df = df.copy()
     df.columns = df.columns.str.strip().str.lower()
 
-    # ---- DATE ----
-    if date_column in df.columns:
-        df[date_column + '_dt'] = pd.to_datetime(
-            df[date_column],
+    if 'datetouse' in df.columns:
+        df['datetouse_dt'] = pd.to_datetime(
+            df['datetouse'],
             errors='coerce',
-            dayfirst=True   # ✅ FIX
-        )
+            dayfirst=True
+        ).dt.normalize()
 
-        # Keep datetime for logic
-        df[date_column + '_dt'] = df[date_column + '_dt'].dt.normalize()
-
-        # Date only (for Excel)
-        df[date_column + '_date'] = df[date_column + '_dt'].dt.date
-
-        # Display string (for UI)
-        df[date_column + '_display'] = df[date_column + '_dt'].dt.strftime("%d/%m/%Y")
+        # ✅ ADD THESE (CRITICAL FIX)
+        df['datetouse_date'] = df['datetouse_dt'].dt.date
+        df['datetouse_display'] = df['datetouse_dt'].dt.strftime("%d/%m/%Y")
 
     else:
-        print(f"⚠️ Column '{date_column}' not found")
-        df[date_column + '_dt'] = pd.NaT
-        df[date_column + '_date'] = None
-        df[date_column + '_display'] = "Unplanned"
+        df['datetouse_dt'] = pd.NaT
+        df['datetouse_date'] = None
+        df['datetouse_display'] = "Unplanned"
 
-    df[date_column + '_display'].fillna("Unplanned", inplace=True)
-
-    # ---- NUMERIC ----
-    for col in numeric_cols:
+    # Numeric columns
+    for col in ['total', 'orig']:
         if col in df.columns:
-            df[col] = pd.to_numeric(
+            df[col] = (
                 df[col].astype(str)
                 .str.replace(" ", "")
-                .str.replace(",", ".", regex=False),
-                errors='coerce'
+                .str.replace(",", ".", regex=False)
+                .astype(float)
             )
 
     return df
