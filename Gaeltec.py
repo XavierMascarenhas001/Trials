@@ -1080,9 +1080,11 @@ for cat_name, keys, y_label in categories:
     sub_df = filtered_df[mask]
 
     # --- Normalize dates in sub_df ---
-    sub_df['datetouse_dt'] = pd.to_datetime(sub_df.get('datetouse', pd.NaT), errors='coerce').dt.normalize()
-    sub_df['datetouse_display'] = sub_df['datetouse_dt'].dt.strftime("%d/%m/%Y")
-    sub_df['datetouse_display'] = sub_df['datetouse_display'].fillna("Unplanned")
+    # --- Normalize dates ---
+    for col in ['datetouse', 'plan1', 'done']:
+        if col in sub_df.columns:
+            sub_df[col] = pd.to_datetime(sub_df[col], errors='coerce').dt.strftime("%d/%m/%Y")
+            sub_df[col] = sub_df[col].fillna("Unplanned")
 
     # Clean numeric columns
     sub_df['qvci_clean'] = pd.to_numeric(sub_df['qvci'] if 'qvci' in sub_df.columns else pd.Series(0, index=sub_df.index), errors='coerce').fillna(0)
