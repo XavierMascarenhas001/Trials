@@ -368,7 +368,7 @@ def to_excel(project_df, team_df):
     return output
 
 
-
+'''
 def generate_excel_styled_multilevel(filtered_df, poles_df=None):
     from openpyxl.drawing.image import Image as XLImage
     from openpyxl.styles import Font, PatternFill, Border, Side
@@ -538,7 +538,7 @@ def generate_excel_safe(export_df, poles_df=None):
 
     buffer.seek(0)
     return buffer
-    
+'''    
 # --- MAPPINGS ---
 
 # --- Project Manager Mapping ---
