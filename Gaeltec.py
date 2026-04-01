@@ -1281,57 +1281,26 @@ for cat_name, keys, y_label in categories:
 # CV8 CALCULATION (EXCLUDE CV7 POLES)
 # --------------------------------------------------
 
-# --------------------------------------------------
-# CV8 CALCULATION (EXCLUDE CV7 POLES)
-# --------------------------------------------------
-
-# -------------------------------
-# DATE NORMALIZATION
-# -------------------------------
-if 'datetouse' in filtered_df.columns:
-    filtered_df['datetouse_dt'] = pd.to_datetime(
-        filtered_df['datetouse'], errors='coerce'
-    ).dt.normalize()
-else:
-    filtered_df['datetouse_dt'] = pd.NaT
-
-filtered_df['datetouse_display'] = (
-    filtered_df['datetouse_dt'].dt.strftime("%d/%m/%Y").fillna("Unplanned")
-)
-
-# -------------------------------
-# CATEGORIES SETUP
-# -------------------------------
-categories = [
-    ("CV7_erect", CV7_erect, "Quantity"),
-    ("CV7_erect_lv", CV7_erect_lv, "Quantity"),
-    ("CV7_recover", CV7_recover, "Quantity"),
-]
+# --- Safety check ---
+if 'filtered_df' not in locals():
+    st.error("Data not loaded into filtered_df")
+    st.stop()
 
 # -------------------------------
 # FUNCTION TO PLOT BAR CHARTS
 # -------------------------------
-def plot_bar_chart(df, category_name, y_label="Quantity", x_col="Mapped"):
+def plot_bar_chart(df, category_name, x_col, y_col="Total", y_label="Quantity"):
     if df.empty:
         st.warning(f"No data for {category_name}")
         return
 
     fig = go.Figure()
     fig.add_bar(
-        x=df[x_col], y=df['Total'],
-        name="Quantity", marker_color="#4C78A8", text=df['Total'],
+        x=df[x_col], y=df[y_col],
+        name=y_label, marker_color="#4C78A8", text=df[y_col],
         texttemplate='%{y}', textposition='outside'
     )
-    fig.add_bar(
-        x=df[x_col], y=df['PositiveVar'],
-        name="Positive Variation", marker_color="green"
-    )
-    fig.add_bar(
-        x=df[x_col], y=df['NegativeVar'],
-        name="Negative Variation", marker_color="red"
-    )
     fig.update_layout(
-        barmode='relative',
         title=f"{category_name} Overview",
         xaxis_title=x_col,
         yaxis_title=y_label,
@@ -1340,88 +1309,39 @@ def plot_bar_chart(df, category_name, y_label="Quantity", x_col="Mapped"):
         yaxis=dict(gridcolor='rgba(255,255,255,0.3)')
     )
     st.plotly_chart(fig, use_container_width=True, height=500)
-    
-# -------------------------------
-# CV7 LOOP
-# -------------------------------
-erect_h_items = [k for k in CV7_erect.keys() if "'H' HV/EHV Pole" in k]
-recover_h_items = [k for k in CV7_recover.keys() if "'A' / 'H' pole" in k]
-
-for cat_name, keys, y_label in categories:
-    if not keys or 'item' not in filtered_df.columns or 'mapped' not in filtered_df.columns:
-        continue
-
-    # <-- Corrected here: use re.escape, NOT pd.re.escape
-    pattern = '|'.join([re.escape(k) for k in keys.keys()])
-    mask = filtered_df['item'].astype(str).str.contains(pattern, case=False, na=False)
-    sub_df = filtered_df[mask].copy()
-
-    # Clean numeric columns
-    sub_df['qvci_clean'] = pd.to_numeric(
-        sub_df.get('qvci', pd.Series(0, index=sub_df.index)),
-        errors='coerce'
-    ).fillna(0)
-
-    sub_df['qsub_clean'] = pd.to_numeric(
-        sub_df.get('qsub', pd.Series(0, index=sub_df.index)),
-        errors='coerce'
-    ).fillna(0)
-
-    sub_df["multiplier"] = 1
-    sub_df.loc[sub_df["item"].isin(erect_h_items), "multiplier"] = 2
-    sub_df.loc[sub_df["item"].isin(recover_h_items), "multiplier"] = 2
-    sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
-
-    # Aggregate
-    bar_data = sub_df.groupby('mapped').agg(
-        Total=('adj_value', 'sum'),
-        Variation=('qvci_clean', 'sum')
-    ).reset_index()
-    bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
-    bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
-    bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
-
-    plot_bar_chart(bar_data, cat_name, y_label)
-    plot_bar_chart(cv8_bar, "CV8", y_label="Unique Poles", x_col="CV8_type")
 
 # -------------------------------
-# CV8 SPECIAL LOGIC
+# COLLECT ALL CV7 POLES
 # -------------------------------
-# Collect poles already counted in CV7
 cv7_poles = pd.concat([
     filtered_df[filtered_df['item'].isin(cat.keys())]['pole']
     for cat in [CV7_erect, CV7_erect_lv, CV7_recover] if cat
 ]).dropna().unique()
 
-# Filter CV8 data (exclude CV7 poles)
-cv8_df = filtered_df[filtered_df['item'].isin(CV8.keys())].copy()
-cv8_df = cv8_df[~cv8_df['pole'].isin(cv7_poles)]
+# -------------------------------
+# FILTER CV8 POLES (EXCLUDE CV7)
+# -------------------------------
+cv8_df = filtered_df[~filtered_df['pole'].isin(cv7_poles)].copy()
 
-# Assign HV / LV type
+# Optional: assign HV/LV type based on project or other logic
 cv8_df['CV8_type'] = cv8_df['project'].apply(
     lambda x: 'CV8_LV' if 'LV' in str(x).upper() else 'CV8_HV'
 )
 
-# Ensure numeric column exists
-cv8_df['qvci_clean'] = pd.to_numeric(
-    cv8_df.get('qvci', pd.Series(0, index=cv8_df.index)),
-    errors='coerce'
-).fillna(0)
-
-# Aggregate CV8: count unique poles
-cv8_bar = cv8_df.groupby('CV8_type').agg(
-    Total=('pole', 'nunique'),
-    Variation=('qvci_clean', 'sum')
+# -------------------------------
+# AGGREGATE: UNIQUE POLES BY TYPE
+# -------------------------------
+cv8_summary = cv8_df.groupby('CV8_type').agg(
+    Total=('pole', 'nunique')
 ).reset_index()
 
-cv8_bar['PositiveVar'] = cv8_bar['Variation'].clip(lower=0)
-cv8_bar['NegativeVar'] = cv8_bar['Variation'].clip(upper=0)
-
-# Plot CV8 bar chart
-plot_bar_chart(cv8_bar, "CV8", y_label="Unique Poles")
+# -------------------------------
+# PLOT CV8 BAR CHART
+# -------------------------------
+plot_bar_chart(cv8_summary, "CV8 Unique Poles", x_col="CV8_type", y_col="Total", y_label="Unique Poles")
 
 # -------------------------------
-# CV8 Drill-down Table
+# CV8 DRILL-DOWN TABLE
 # -------------------------------
 with st.expander("🔍 CV8 Drill-down: Unique Poles Details", expanded=False):
     display_cols = ['project', 'segmentcode', 'segmentdesc', 'pole', 'item', 'comment', 'plan1', 'done']
@@ -1429,6 +1349,9 @@ with st.expander("🔍 CV8 Drill-down: Unique Poles Details", expanded=False):
     display_df = cv8_df[display_cols].drop_duplicates(subset=['pole'])
     st.dataframe(display_df, use_container_width=True)
     st.write(f"**Total unique poles displayed:** {display_df['pole'].nunique()}")
+
+
+
 # -------------------------------
 # HIGH-LEVEL PROJECT DISPLAY
 # -------------------------------
