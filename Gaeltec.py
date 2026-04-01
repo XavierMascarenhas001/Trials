@@ -184,26 +184,36 @@ def apply_common_filters(df):
     df = df.copy()
 
     # Ensure datetime
-    df['datetouse_dt'] = pd.to_datetime(df['datetouse'], errors='coerce')
+    df['datetouse_dt'] = pd.to_datetime(
+        df['datetouse'],
+        errors='coerce',
+        dayfirst=True
+    )
+
+    df['datetouse_dt'] = df['datetouse_dt'].dt.normalize()
+
+    # ✅ ADD THESE BACK
+    df['datetouse_date'] = df['datetouse_dt'].dt.date
+    df['datetouse_display'] = df['datetouse_dt'].dt.strftime("%d/%m/%Y")
 
     # Date rule: after 2023
     df = df[df['datetouse_dt'].dt.year > 2023]
 
-    # Segment
+    # Segment filter
     if selected_segment != 'All' and 'segmentcode' in df.columns:
         df = df[
             df['segmentcode'].astype(str).str.strip()
             == str(selected_segment).strip()
         ]
 
-    # Pole
+    # Pole filter
     if selected_pole != "All" and 'pole' in df.columns:
         df = df[
             df['pole'].astype(str).str.strip()
             == str(selected_pole).strip()
         ]
 
-    # Ensure numeric total
+    # Numeric
     if 'total' in df.columns:
         df['total'] = pd.to_numeric(df['total'], errors='coerce')
 
