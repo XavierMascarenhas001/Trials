@@ -1559,7 +1559,6 @@ def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
                 project_summary = filtered_df.groupby('project', as_index=False)[numeric_cols].sum()
                 project_summary.to_excel(writer, sheet_name="Project_Summary", index=False)
 
-        writer.save()
         excel_data = output.getvalue()
 
     return excel_data
