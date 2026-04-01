@@ -511,34 +511,7 @@ def generate_excel_styled_multilevel(filtered_df, poles_df=None):
     wb.save(output)
     output.seek(0)
     return output
-
-'''
-
-
-# --- Right: Projects & Circuits Overview ---
-# --------------------------------------------------
-# FUNCTION: GENERATE EXCEL FILE
-# --------------------------------------------------
-def safe_excel_write(writer, df, sheet_name, dummy_text="No data available"):
-    """Write a DataFrame safely to Excel, ensuring at least one visible row."""
-    if df is None or df.empty:
-        df = pd.DataFrame({"Info": [dummy_text]})
-    df.to_excel(writer, sheet_name=sheet_name[:31], index=False, startrow=1, na_rep="")
-    
-def generate_excel_safe(export_df, poles_df=None):
-    buffer = BytesIO()
-
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        # Main sheet
-        safe_excel_write(writer, export_df, "HighLevel")
-
-        # Optional poles sheet
-        if poles_df is not None:
-            safe_excel_write(writer, poles_df, "Poles", dummy_text="No poles data")
-
-    buffer.seek(0)
-    return buffer
-'''    
+   
 # --- MAPPINGS ---
 
 # --- Project Manager Mapping ---
