@@ -1317,71 +1317,41 @@ with center_col:
 # -------------------------------
 # ---- Full Excel Export ----
 # -------------------------------
+# Create a BytesIO buffer for Excel output
 buffer_agg = BytesIO()
 
 with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
-
-    # -----------------------
-    # ---- Ensure at least one sheet ----
-    # -----------------------
-    if filtered_df is None or filtered_df.empty:
-        # Create a default sheet to prevent openpyxl crash
-        pd.DataFrame({"Info": ["No data available"]}).to_excel(
-            writer, sheet_name="Output", index=False
-        )
+    # --- Write CV7 Erect sheet ---
+    if not cv7_erect_df.empty:
+        cv7_erect_df.to_excel(writer, sheet_name="CV7_Erect", index=False)
     else:
-        # --- Output Sheet ---
-        export_df = filtered_df.rename(columns=column_rename_map).copy()
-        export_df["Quantity_used"] = pd.to_numeric(export_df.get("Quantity_used", 0), errors="coerce").fillna(0)
-        if "qcvi" in export_df.columns:
-            export_df["qcvi"] = pd.to_numeric(export_df["qcvi"], errors="coerce").fillna(0)
-        export_df["item_norm"] = export_df["item"].apply(normalize_item)
+        pd.DataFrame({"Info": ["No data"]}).to_excel(writer, sheet_name="CV7_Erect", index=False)
+    
+    # --- Write CV7 Recover sheet ---
+    if not cv7_recover_df.empty:
+        cv7_recover_df.to_excel(writer, sheet_name="CV7_Recover", index=False)
+    else:
+        pd.DataFrame({"Info": ["No data"]}).to_excel(writer, sheet_name="CV7_Recover", index=False)
+    
+    # --- Write CV Totals sheet ---
+    totals_df = pd.DataFrame(list(cv_totals.items()), columns=["Category", "Total"])
+    totals_df.to_excel(writer, sheet_name="CV_Totals", index=False)
 
-        # Multiply H-poles
-        h_mask = export_df["item"].str.contains("'H' HV/EHV Pole", case=False, na=False)
-        h_recover_mask = export_df["item"].str.contains("Recover 'A' / 'H' pole, up", case=False, na=False)
-        export_df.loc[h_mask | h_recover_mask, "Quantity_used"] *= 2
+    # --- Write Projects Overview ---
+    if not projects_overview.empty:
+        projects_overview.to_excel(writer, sheet_name="Projects_Overview", index=False)
+    else:
+        pd.DataFrame({"Info": ["No projects"]}).to_excel(writer, sheet_name="Projects_Overview", index=False)
+    
+    # --- Optional: add more sheets for other categories ---
+    # e.g., CV7_OHL_Conductor, CV7_SWITCHGEAR, etc.
+    # Just follow the same pattern: check if empty, write DataFrame, else write placeholder
+    
+    # Ensure at least one sheet is visible
+    if len(writer.sheets) == 0:
+        pd.DataFrame({"Info": ["No data available"]}).to_excel(writer, sheet_name="Summary", index=False)
 
-        # Write Output sheet
-        export_df_to_write = export_df.copy().where(pd.notnull(export_df), "")
-        if "qcvi" in export_df_to_write.columns:
-            export_df_to_write.loc[export_df_to_write["qcvi"] == 0, "qcvi"] = ""
-        export_df_to_write.to_excel(writer, sheet_name="Output", index=False, startrow=0)
+    writer.save()
 
-        # --- Summary Sheet ---
-        summary_rows = []
-        for project, df_proj in export_df.groupby("project"):
-            df_proj = df_proj.copy()
-            df_proj["qcvi"] = pd.to_numeric(df_proj.get("qcvi", 0), errors="coerce").fillna(0)
-            summary_rows.append({
-                "Project": project,
-                "CV7_erect": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_erect.keys()])]["Quantity_used"].sum(),
-                "QCVI": df_proj["qcvi"].sum()
-            })
-        final_summary = pd.DataFrame(summary_rows)
-
-        if final_summary.empty:
-            # Prevent workbook with zero visible sheets
-            pd.DataFrame({"Info": ["No summary available"]}).to_excel(writer, sheet_name="Summary", index=False)
-        else:
-            final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=0)
-
-        # --- Breakdown sheets ---
-        breakdown_columns = {
-            "CV7_erect": CV7_erect.keys(),
-            "CV7_recover": CV7_recover.keys(),
-        }
-        for col_name, keys in breakdown_columns.items():
-            df_breakdown = export_df[export_df["item_norm"].isin([normalize_item(k) for k in keys])]
-            if df_breakdown.empty:
-                continue
-            df_breakdown.to_excel(writer, sheet_name=col_name[:31], index=False, startrow=0)
-
-# Ready for download
+# Move buffer to the beginning for download or further processing
 buffer_agg.seek(0)
-st.download_button(
-    label="📥 Download Excel (Output Details)",
-    data=buffer_agg,
-    file_name="Gaeltec_Output.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
