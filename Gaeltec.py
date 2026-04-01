@@ -1365,52 +1365,7 @@ with st.expander("🔍 CV8 Drill-down: Unique Poles Details", expanded=False):
 
 
 
-# -------------------------------
-# HIGH-LEVEL PROJECT DISPLAY
-# -------------------------------
-st.markdown("<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>", unsafe_allow_html=True)
-required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
-existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
-if 'project' in existing_cols:
-    projects = filtered_df['project'].dropna().unique()
-    if len(projects) == 0:
-        st.info("No projects found.")
-    else:
-        for proj in sorted(projects):
-            proj_df = filtered_df[filtered_df['project'] == proj]
-            cols_to_use = [c for c in required_cols if c in proj_df.columns]
-            segments = proj_df[cols_to_use].dropna(subset=['segmentcode']).drop_duplicates()
-
-            with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
-                display_lines = []
-                for _, row in segments.iterrows():
-                    district = str(row.get("shire", ""))
-                    dt = row.get("datetouse_dt", None)
-                    date = dt.strftime("%d/%m/%Y") if pd.notna(dt) else "Missing"
-                    circuit = str(row.get("segmentcode", ""))
-                    segment = str(row.get("segmentdesc", ""))
-                    display_lines.append(f"{district} | {date} | {circuit} | {segment}")
-
-                st.markdown(
-                    f"""
-                    <div style='
-                        max-height:400px;
-                        overflow-y:auto;
-                        padding:12px;
-                        border:1px solid #444;
-                        background-color:#111;
-                        font-family:monospace;
-                        font-size:14px;
-                        white-space:nowrap;
-                    '>
-                    {"<br>".join(display_lines)}
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-else:
-    st.info("Project column not found in the data.")
 # --------------------------------------------------
 # PAGE / LAYOUT (WIDER DISPLAY)
 # --------------------------------------------------
