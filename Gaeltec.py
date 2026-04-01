@@ -1510,61 +1510,53 @@ with center_col:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-bar_data_dict = {}       # Stores the summary bar chart data per category
-drilldown_dict = {}      # Stores the full drill-down table per category
+def generate_excel_export(bar_data_dict, drilldown_dict):
+    """
+    Generates an Excel file in memory with:
+    - One sheet per bar chart (summary)
+    - One sheet per drill-down table
+    - One sheet with overall summary by project
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
 
-categories_to_process = categories + [("CV8 Unique Poles", cv8_summary, "Unique Poles")]
+        # --- 1️⃣ Bar chart sheets ---
+        for cat_name, df in bar_data_dict.items():
+            if df.empty:
+                continue
+            sheet_name = sanitize_sheet_name(cat_name)
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-for cat_name, keys_or_df, y_label in categories_to_process:
-    
-    if cat_name == "CV8 Unique Poles":
-        bar_df = keys_or_df.copy()
-        drilldown_df = cv8_df.drop_duplicates(subset=['pole'])
-    else:
-        pattern = '|'.join([re.escape(k) for k in keys_or_df.keys()])
-        mask = filtered_df['item'].astype(str).str.contains(pattern, case=False, na=False)
-        sub_df = filtered_df[mask].copy()
+        # --- 2️⃣ Drill-down sheets ---
+        for cat_name, df in drilldown_dict.items():
+            if df.empty:
+                continue
+            sheet_name = sanitize_sheet_name(f"{cat_name}_details")
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        if cat_name == "CV31":
-            sub_df = sub_df.drop_duplicates(subset=['pole'])
+        # --- 3️⃣ Summary by project ---
+        # Combine all drill-downs to get project-level summary
+        combined_df = pd.concat(drilldown_dict.values(), ignore_index=True)
+        if 'project' in combined_df.columns:
+            project_summary = (
+                combined_df
+                .groupby('project', as_index=False)
+                .agg(
+                    Total_Poles=('pole', 'nunique'),
+                    Total_Quantity=('qty', 'sum')
+                )
+            )
+            project_summary.to_excel(writer, sheet_name='Project_Summary', index=False)
 
-        # --- Safe numeric conversion ---
-        sub_df['qvci_clean'] = pd.to_numeric(
-            sub_df['qvci'] if 'qvci' in sub_df.columns else pd.Series(0, index=sub_df.index),
-            errors='coerce'
-        ).fillna(0)
-        sub_df['qsub_clean'] = pd.to_numeric(
-            sub_df['qsub'] if 'qsub' in sub_df.columns else pd.Series(0, index=sub_df.index),
-            errors='coerce'
-        ).fillna(0)
-
-        sub_df['multiplier'] = 1
-        sub_df.loc[sub_df["item"].isin(erect_h_items), "multiplier"] = 2
-        sub_df.loc[sub_df["item"].isin(recover_h_items), "multiplier"] = 2
-        sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
-
-        if cat_name == "CV31":
-            bar_df = sub_df.groupby('mapped').agg(
-                Total=('pole', 'count'),
-                Variation=('qvci_clean', 'sum')
-            ).reset_index()
-        else:
-            bar_df = sub_df.groupby('mapped').agg(
-                Total=('adj_value', 'sum'),
-                Variation=('qvci_clean', 'sum')
-            ).reset_index()
-
-        drilldown_df = sub_df.copy()
-
-    bar_data_dict[cat_name] = bar_df
-    drilldown_dict[cat_name] = drilldown_df
-# -------------------------------
-# 4️⃣ Download button
-# -------------------------------
+        writer.save()
+        excel_data = output.getvalue()
+    return excel_data
+# Prepare your bar data and drill-downs as we discussed
 excel_bytes = generate_excel_export(bar_data_dict, drilldown_dict)
+
 st.download_button(
-    label="📥 Download All Data to Excel",
+    label="📥 Export Excel",
     data=excel_bytes,
-    file_name=f"Planning_and_BarCharts_{date_range_str}.xlsx",
+    file_name=f"Planning_Export_{date_range_str}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
