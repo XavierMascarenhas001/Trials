@@ -512,19 +512,19 @@ def generate_excel_styled_multilevel(filtered_df, poles_df=None):
 # --------------------------------------------------
 # FUNCTION: GENERATE EXCEL FILE
 # --------------------------------------------------
-def generate_excel_styled_multilevel(export_df, poles_df=None):
+def generate_excel_safe(export_df, poles_df=None):
     buffer = BytesIO()
-    
-    if export_df.empty and (poles_df is None or poles_df.empty):
-        # Create a dummy sheet to avoid IndexError
+
+    # If all DataFrames are empty, create a dummy one
+    if (export_df is None or export_df.empty) and (poles_df is None or poles_df.empty):
         export_df = pd.DataFrame({"Info": ["No data available"]})
-    
+
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        if not export_df.empty:
+        if export_df is not None and not export_df.empty:
             export_df.to_excel(writer, sheet_name="HighLevel", index=False)
         if poles_df is not None and not poles_df.empty:
             poles_df.to_excel(writer, sheet_name="Poles", index=False)
-    
+
     buffer.seek(0)
     return buffer.getvalue()
     
@@ -1289,7 +1289,7 @@ with center_col:
 
         export_df = filtered_df[[c for c in export_columns if c in filtered_df.columns]].copy()
 
-        excel_file = generate_excel_styled_multilevel(
+        excel_file = generate_excel_safe(
             export_df,
             poles_df if 'poles_df' in locals() else None
         )
