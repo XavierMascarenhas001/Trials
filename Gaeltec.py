@@ -1135,6 +1135,21 @@ for cat_name, keys, y_label in categories:
             st.dataframe(selected_rows, use_container_width=True)
             st.write(f"**Total records:** {len(selected_rows)}")
 
+# --- Right: Projects & Circuits Overview ---
+# --------------------------------------------------
+# FUNCTION: GENERATE EXCEL FILE
+# --------------------------------------------------
+def generate_excel_styled_multilevel(df, poles=None):
+    output = BytesIO()
+    # Use openpyxl to avoid missing xlsxwriter
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+
+        if poles is not None:
+            poles.to_excel(writer, index=False, sheet_name='Poles')
+
+    output.seek(0)
+    return output
 
 # --------------------------------------------------
 # PAGE / LAYOUT (WIDER DISPLAY)
@@ -1521,21 +1536,6 @@ else:
     st.info("No data available for Excel export.")
 
 
-# --- Right: Projects & Circuits Overview ---
-# --------------------------------------------------
-# FUNCTION: GENERATE EXCEL FILE
-# --------------------------------------------------
-def generate_excel_styled_multilevel(df, poles=None):
-    output = BytesIO()
-    # Use openpyxl to avoid missing xlsxwriter
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Data')
-
-        if poles is not None:
-            poles.to_excel(writer, index=False, sheet_name='Poles')
-
-    output.seek(0)
-    return output
 
 
 
