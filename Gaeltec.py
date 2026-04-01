@@ -366,7 +366,9 @@ def to_excel(project_df, team_df):
 
     output.seek(0)
     return output
-'''
+
+
+
 def generate_excel_styled_multilevel(filtered_df, poles_df=None):
     from openpyxl.drawing.image import Image as XLImage
     from openpyxl.styles import Font, PatternFill, Border, Side
@@ -507,7 +509,10 @@ def generate_excel_styled_multilevel(filtered_df, poles_df=None):
     wb.save(output)
     output.seek(0)
     return output
-'''
+
+
+
+
 # --- Right: Projects & Circuits Overview ---
 # --------------------------------------------------
 # FUNCTION: GENERATE EXCEL FILE
@@ -1293,7 +1298,7 @@ with center_col:
 
         export_df = filtered_df[[c for c in export_columns if c in filtered_df.columns]].copy()
 
-        excel_file = generate_excel_safe(
+        excel_file = generate_excel_styled_multilevel(
             export_df,
             poles_df if 'poles_df' in locals() else None
         )
