@@ -1312,10 +1312,6 @@ categories = [
 # FUNCTION TO PLOT BAR CHARTS
 # -------------------------------
 def plot_bar_chart(df, category_name, y_label="Quantity", x_col="Mapped"):
-    """
-    df: dataframe with columns [x_col, 'Total', 'PositiveVar', 'NegativeVar']
-    x_col: name of column to use for x-axis (default 'Mapped')
-    """
     if df.empty:
         st.warning(f"No data for {category_name}")
         return
@@ -1385,6 +1381,7 @@ for cat_name, keys, y_label in categories:
     bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
     bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
 
+    plot_bar_chart(bar_data, cat_name, y_label)
     plot_bar_chart(cv8_bar, "CV8", y_label="Unique Poles", x_col="CV8_type")
 
 # -------------------------------
