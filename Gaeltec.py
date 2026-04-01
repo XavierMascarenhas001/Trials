@@ -1219,69 +1219,72 @@ st.markdown("<h2 style='text-align:center; color:white;'>Projects & Circuits Ove
 required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
 existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
-    if 'project' in existing_cols:
-        projects = filtered_df['project'].dropna().unique()
+if 'project' in existing_cols:
+    projects = filtered_df['project'].dropna().unique()
 
-        if len(projects) == 0:
-            st.info("No projects found for the selected filters.")
-        else:
-            for proj in sorted(projects):
-                proj_df = filtered_df[filtered_df['project'] == proj]
-
-                # ✅ columns for display
-                cols_to_use = [c for c in required_cols if c in proj_df.columns]
-
-                segments = (
-                    proj_df[cols_to_use]
-                    .dropna(subset=['segmentcode'])
-                    .drop_duplicates()
-                )
-
-                with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
-                    if not segments.empty:
-
-                        display_lines = []
-
-                        for _, row in segments.iterrows():
-                            district = str(row.get("shire", ""))
-                            dt = row.get("datetouse_dt", None)
-                            if pd.notna(dt):
-                                date = dt.strftime("%d/%m/%Y")
-                            else:
-                                date = "Unplanned"
-                            circuit = str(row.get("segmentcode", ""))
-                            segment = str(row.get("segmentdesc", ""))
-
-                            line = f"{district} | {date} | {circuit} | {segment}"
-                            display_lines.append(line)
-
-                        # ✅ WIDER + SCROLLABLE DISPLAY BOX
-                        st.markdown(
-                            """
-                            <div style='
-                                max-height:300px;
-                                overflow-y:auto;
-                                padding:12px;
-                                border:1px solid #444;
-                                background-color:#111;
-                                font-family:monospace;
-                                font-size:14px;
-                                white-space:nowrap;
-                            '>
-                            """ + "<br>".join(display_lines) + "</div>",
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        st.write("No circuit data for this project.")
-
+    if len(projects) == 0:
+        st.info("No projects found for the selected filters.")
     else:
-        st.info("Project column not found in the data.")
+        for proj in sorted(projects):
+            proj_df = filtered_df[filtered_df['project'] == proj]
+
+            # ✅ columns for display
+            cols_to_use = [c for c in required_cols if c in proj_df.columns]
+
+            segments = (
+                proj_df[cols_to_use]
+                .dropna(subset=['segmentcode'])
+                .drop_duplicates()
+            )
+
+            with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
+                if not segments.empty:
+                    display_lines = []
+
+                    for _, row in segments.iterrows():
+                        district = str(row.get("shire", ""))
+                        dt = row.get("datetouse_dt", None)
+                        if pd.notna(dt):
+                            date = dt.strftime("%d/%m/%Y")  # Day/Month/Year
+                        else:
+                            date = "Unplanned"
+                        circuit = str(row.get("segmentcode", ""))
+                        segment = str(row.get("segmentdesc", ""))
+
+                        line = f"{district} | {date} | {circuit} | {segment}"
+                        display_lines.append(line)
+
+                    # ✅ WIDER + SCROLLABLE DISPLAY BOX
+                    st.markdown(
+                        """
+                        <div style='
+                            width:100%;
+                            max-height:400px;
+                            overflow-x:auto;
+                            overflow-y:auto;
+                            padding:12px;
+                            border:1px solid #444;
+                            background-color:#111;
+                            font-family:monospace;
+                            font-size:14px;
+                            white-space:nowrap;
+                        '>
+                        """ + "<br>".join(display_lines) + "</div>",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.write("No circuit data for this project.")
+
+else:
+    st.info("Project column not found in the data.")
 
 # --------------------------------------------------
 # GLOBAL EXCEL DOWNLOAD BUTTON
 # --------------------------------------------------
 st.markdown("---")
 
+# Assuming center_col is defined from your previous layout
+col1, center_col, col3 = st.columns([1, 3, 1])
 with center_col:
     if 'filtered_df' in locals() and not filtered_df.empty:
 
@@ -1307,6 +1310,5 @@ with center_col:
             file_name=f"High_level_planning_{date_range_str}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
 
 
