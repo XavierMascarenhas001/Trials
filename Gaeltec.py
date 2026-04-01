@@ -1455,7 +1455,7 @@ with center_col:
     )
 
     # ✅ REQUIRED COLUMNS (UPDATED)
-    required_cols = ['shire', 'datetouse_date', 'project', 'segmentcode', 'segmentdesc']
+    required_cols = ['shire', 'datetouse_display', 'project', 'segmentcode', 'segmentdesc']
     existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
     if 'project' in existing_cols:
@@ -1523,7 +1523,7 @@ with center_col:
         # ✅ DEFINE EXPORT COLUMNS (MATCH DISPLAY)
         export_columns = [
             "shire",
-            "datetouse_date",
+            "datetouse_display",
             "project",
             "segmentcode",
             "segmentdesc"
@@ -1551,7 +1551,7 @@ with center_col:
 
     export_columns = [
         "shire",
-        "datetouse_date",
+        "datetouse_display",
         "project",
         "segmentcode",
         "segmentdesc"
