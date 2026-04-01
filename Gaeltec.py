@@ -366,7 +366,7 @@ def to_excel(project_df, team_df):
 
     output.seek(0)
     return output
-
+'''
 def generate_excel_styled_multilevel(filtered_df, poles_df=None):
     from openpyxl.drawing.image import Image as XLImage
     from openpyxl.styles import Font, PatternFill, Border, Side
@@ -507,7 +507,26 @@ def generate_excel_styled_multilevel(filtered_df, poles_df=None):
     wb.save(output)
     output.seek(0)
     return output
-
+'''
+# --- Right: Projects & Circuits Overview ---
+# --------------------------------------------------
+# FUNCTION: GENERATE EXCEL FILE
+# --------------------------------------------------
+def generate_excel_styled_multilevel(export_df, poles_df=None):
+    buffer = BytesIO()
+    
+    if export_df.empty and (poles_df is None or poles_df.empty):
+        # Create a dummy sheet to avoid IndexError
+        export_df = pd.DataFrame({"Info": ["No data available"]})
+    
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        if not export_df.empty:
+            export_df.to_excel(writer, sheet_name="HighLevel", index=False)
+        if poles_df is not None and not poles_df.empty:
+            poles_df.to_excel(writer, sheet_name="Poles", index=False)
+    
+    buffer.seek(0)
+    return buffer.getvalue()
     
 # --- MAPPINGS ---
 
@@ -1161,21 +1180,7 @@ for cat_name, keys, y_label in categories:
             st.dataframe(selected_rows, use_container_width=True)
             st.write(f"**Total records:** {len(selected_rows)}")
 
-# --- Right: Projects & Circuits Overview ---
-# --------------------------------------------------
-# FUNCTION: GENERATE EXCEL FILE
-# --------------------------------------------------
-def generate_excel_styled_multilevel(df, poles=None):
-    output = BytesIO()
-    # Use openpyxl to avoid missing xlsxwriter
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Data')
 
-        if poles is not None:
-            poles.to_excel(writer, index=False, sheet_name='Poles')
-
-    output.seek(0)
-    return output
 
 # --------------------------------------------------
 # PAGE / LAYOUT (WIDER DISPLAY)
