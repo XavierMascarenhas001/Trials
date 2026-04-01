@@ -38,21 +38,35 @@ st.set_page_config(
 )
 
 def preprocess_df(df, date_column='datetouse', numeric_cols=['total','orig']):
-    # Ensure column names are lowercase and stripped
+    df = df.copy()
+
+    # Clean column names
     df.columns = df.columns.str.strip().str.lower()
-    
-    # Dates
-    df[date_column + '_dt'] = pd.to_datetime(df.get(date_column), errors='coerce').dt.normalize()
+
+    # ---- DATE HANDLING ----
+    df[date_column + '_dt'] = pd.to_datetime(
+        df.get(date_column),
+        errors='coerce'
+    )
+
+    # Pure date (NO TIME) → best for Excel
+    df[date_column + '_date'] = df[date_column + '_dt'].dt.date
+
+    # Display string (for dashboard)
     df[date_column + '_display'] = df[date_column + '_dt'].dt.strftime("%d/%m/%Y")
+
     df[date_column + '_display'].fillna("Unplanned", inplace=True)
 
-    # Numeric columns
+    # ---- NUMERIC CLEAN ----
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(
-                df[col].astype(str).str.replace(" ", "").str.replace(",", ".", regex=False),
+                df[col].astype(str)
+                .str.replace(" ", "")
+                .str.replace(",", ".", regex=False),
                 errors='coerce'
             )
+
     return df
 
 def sanitize_sheet_name(name: str) -> str:
@@ -1450,7 +1464,7 @@ with center_col:
 
                         for _, row in segments.iterrows():
                             district = str(row.get("shire", ""))
-                            date = str(row.get("datetouse_dt", ""))
+                            date = str(row.get("datetouse_date", ""))
                             circuit = str(row.get("segmentcode", ""))
                             segment = str(row.get("segmentdesc", ""))
 
