@@ -1530,12 +1530,42 @@ def sanitize_sheet_name(name: str) -> str:
 # -------------------
 # EXCEL EXPORT FUNCTION
 # -------------------
-def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
+display_columns = [
+    'shire', 'project', 'segmentcode', 'segmentdesc', 'comment',
+    'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done', 'item'
+]
+def generate_excel_export(display_columns, bar_data_dict, drilldown_dict, filtered_df):
+    """
+    Export Excel with:
+    1. Project_Summary (aggregated by project, same columns as display)
+    2. Bar chart sheets
+    3. Drill-down sheets
+    4. Combined_Data (filtered_df with same columns)
+    """
     output = io.BytesIO()
-    
+
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
 
-        # 1️⃣ Bar chart sheets
+        # --- 1️⃣ Project_Summary sheet ---
+        if 'project' in filtered_df.columns:
+            # Keep only display columns that exist in filtered_df
+            cols = [c for c in display_columns if c in filtered_df.columns]
+            proj_df = filtered_df[cols].copy()
+
+            # Split numeric and text columns
+            numeric_cols = proj_df.select_dtypes(include='number').columns.tolist()
+            text_cols = [c for c in cols if c not in numeric_cols]
+
+            # Aggregate
+            project_summary = (
+                proj_df.groupby('project', as_index=False)
+                .agg(
+                    {**{c: 'first' for c in text_cols}, **{c: 'sum' for c in numeric_cols}}
+                )
+            )
+            project_summary.to_excel(writer, sheet_name="Project_Summary", index=False)
+
+        # --- 2️⃣ Bar chart sheets ---
         for cat_name, df in bar_data_dict.items():
             if df.empty:
                 continue
@@ -1543,34 +1573,30 @@ def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
             sheet_name = sanitize_sheet_name(cat_name)
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # 2️⃣ Drill-down sheets
+        # --- 3️⃣ Drill-down sheets ---
         for cat_name, df in drilldown_dict.items():
             if df.empty:
                 continue
-            df = df.fillna("")
+            # Keep only display columns
+            cols = [c for c in display_columns if c in df.columns]
+            df_to_export = df[cols].copy().fillna("")
             sheet_name = sanitize_sheet_name(f"{cat_name}_details")
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            df_to_export.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # 3️⃣ Combined filtered data
+        # --- 4️⃣ Combined_Data sheet ---
         if not filtered_df.empty:
-            df = filtered_df.fillna("")
-            df.to_excel(writer, sheet_name="Combined_Data", index=False)
+            cols = [c for c in display_columns if c in filtered_df.columns]
+            combined_df = filtered_df[cols].copy().fillna("")
+            combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
 
-        # 4️⃣ Project summary
-        if 'project' in filtered_df.columns:
-            numeric_cols = filtered_df.select_dtypes(include='number').columns.tolist()
-            if numeric_cols:
-                project_summary = filtered_df.groupby('project', as_index=False)[numeric_cols].sum()
-                project_summary.to_excel(writer, sheet_name="Project_Summary", index=False)
-
-    # Only now get bytes
+    # Get bytes after writing
     return output.getvalue()
 
 # -------------------
 # DOWNLOAD BUTTON
 # -------------------
 if bar_data_dict or drilldown_dict:
-    excel_bytes = generate_excel_export(bar_data_dict, drilldown_dict, filtered_df)
+    excel_bytes = generate_excel_export(display_columns, bar_data_dict, drilldown_dict, filtered_df)
 
     st.download_button(
         label="📥 Export All Data to Excel",
