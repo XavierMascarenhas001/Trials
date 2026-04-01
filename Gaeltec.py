@@ -1209,11 +1209,7 @@ for cat_name, keys, y_label in categories:
             Variation=('qvci_clean', 'sum')
         ).reset_index()
         
-    # Aggregate
-    bar_data = sub_df.groupby('mapped').agg(
-        Total=('adj_value', 'sum'),
-        Variation=('qvci_clean', 'sum')
-    ).reset_index()
+
     bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
     bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
     bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
