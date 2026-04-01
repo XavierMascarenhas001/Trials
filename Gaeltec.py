@@ -515,14 +515,20 @@ def generate_excel_styled_multilevel(filtered_df, poles_df=None):
 def generate_excel_safe(export_df, poles_df=None):
     buffer = BytesIO()
 
-    # If all DataFrames are empty, create a dummy one
-    if (export_df is None or export_df.empty) and (poles_df is None or poles_df.empty):
+    # If main DataFrame is empty, add a dummy row to avoid zero-sheet error
+    if export_df is None or export_df.empty:
         export_df = pd.DataFrame({"Info": ["No data available"]})
 
+    # Same for poles_df
+    if poles_df is not None and poles_df.empty:
+        poles_df = pd.DataFrame({"Info": ["No poles data"]})
+
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        if export_df is not None and not export_df.empty:
-            export_df.to_excel(writer, sheet_name="HighLevel", index=False)
-        if poles_df is not None and not poles_df.empty:
+        # Write main export
+        export_df.to_excel(writer, sheet_name="HighLevel", index=False)
+
+        # Write poles sheet if it exists
+        if poles_df is not None:
             poles_df.to_excel(writer, sheet_name="Poles", index=False)
 
     buffer.seek(0)
