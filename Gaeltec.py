@@ -589,6 +589,8 @@ file_project_mapping = {
     "11kv rebuilt": ["Lanark", "11kV Rebuilt"],
     "33kv rebuilt": ["Lanark", "33kV Rebuilt"],
     "Hi5_4_Lanark_2026": ["Lanark", "11kV Refurb"],
+    "Hi5_4_Ayrshire_2026": ["Lanark", "11kV Refurb"],
+
 }
 
 CV7_erect = {
@@ -619,22 +621,38 @@ CV7_Tx = {
     "Remove platform mounted or 'H' pole mounted transformer.": "CV7 Tx)"
 }
 
+# --- Transformer Mappings ---
+transformer = {
+    "Transformer 1ph 50kVA": "TX 1ph (50kVA)",
+    "Transformer 3ph 50kVA": "TX 3ph (50kVA)",
+    "Transformer 1ph 100kVA": "TX 1ph (100kVA)",
+    "Transformer 1ph 25kVA": "TX 1ph (25kVA)",
+    "Transformer 3ph 200kVA": "TX 3ph (200kVA)",
+    "Transformer 3ph 100kVA": "TX 3ph (100kVA)"
+}
+
 # --- Equipment / Conductor Mappings ---
-CV7_OHL_CONDUCTOR = {
+CV7_OHL_CONDUCTOR_instal = {
     "Install bare conductor, run out, sag, terminate, bind in and connect jumpers; <100mm²": "CV7 OHL CONDUCTOR",
     "Install bare conductor, run out, sag, terminate, bind in and connect jumpers; >=100mm² <200mm²": "CV7 OHL CONDUCTOR",
     "Install conductor, run out, sag, terminate, clamp in and form jumper loops; >=200mm²": "CV7 OHL CONDUCTOR",
+
+}
+CV7_OHL_CONDUCTOR_recover = {
     "Recover overhead wire and fittings; HV/EHV overhead line or Hardex Pilot (1 conductor)": "CV7 OHL CONDUCTOR",
     "Recover overhead wire and fittings; HV/EHV overhead line or Hardex Pilot (2 conductor)": "CV7 OHL CONDUCTOR",
     "Recover overhead wire and fittings; HV/EHV overhead line or Hardex Pilot (3 conductor)": "CV7 OHL CONDUCTOR",
 }
 
     # LV cables per meter
-CV7_OHL_CONDUCTOR_LV = {
+CV7_OHL_CONDUCTOR_LV_instal = {
     "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 2c": "CV7 OHL CONDUCTOR LV",
     "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 4c": "CV7 OHL CONDUCTOR LV",
     "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 2c + Earth": "CV7 OHL CONDUCTOR LV",
     "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 4c + Earth": "CV7 OHL CONDUCTOR LV",
+}
+
+CV7_OHL_CONDUCTOR_LV_recover = {
     "Recover overhead wires and fittings; LV openwire overhead line (2 conductors)": "CV7 OHL CONDUCTOR LV",
     "Recover overhead wires and fittings; LV openwire overhead line (3 conductors)": "CV7 OHL CONDUCTOR LV",
     "Recover overhead wires and fittings; LV openwire overhead line (4 conductors)": "CV7 OHL CONDUCTOR LV",
@@ -670,6 +688,68 @@ CV7_UG = {
 CV7_CB = {
     "Remove Auto Reclosure.": "CV7 CB",
 }
+
+Switch = {
+    "Noja": "Noja",
+    "11kV PMSW (Soule)": "11kV PMSW (Soule)",
+    "11kv ABSW Hookstick Standard": "11kv ABSW Hookstick Standard",
+    "11kv ABSW Hookstick Spring loaded mech": "11kv ABSW Hookstick Spring loaded mech",
+    "33kv ABSW Hookstick Dependant": "33kv ABSW Hookstick Dependant",
+}
+
+Fuses = {
+    "100A LV Fuse JPU 82.5mm": "100A LV Fuse JPU 82.5mm",
+    "160A LV Fuse JPU 82.5mm": "160A LV Fuse JPU 82.5mm",
+    "200A LV Fuse JPU 82.5mm": "200A LV Fuse JPU 82.5mm",
+    "315A LV Fuse JPU 82.5mm": "315A LV Fuse JPU 82.5mm",
+    "400A LV Fuse JPU 82.5mm": "400A LV Fuse JPU 82.5mm",
+    "200A LV Fuse JSU 92mm": "200A LV Fuse JSU 92mm",
+    "315A LV Fuse JSU 92mm": "315A LV Fuse JSU 92mm",
+    "400A LV Fuse JSU 92mm": "400A LV Fuse JSU 92mm",
+    "100A LV Fuse - Porcelain screw-in": "100A LV Fuse - Porcelain screw-in",
+    "160A LV Fuse - Porcelain screw-in": "160A LV Fuse - Porcelain screw-in",
+    "200A LV Fuse - Porcelain screw-in": "200A LV Fuse - Porcelain screw-in",
+    "Single Phase cut out kit 100A Henley Series 7": "Single Phase cut out kit 100A Henley Series 7",
+    "Three Phase cut out kit 100A Henley Series 7": "Three Phase cut out kit 100A Henley Series 7",
+    "Three Phase 200A Cut out": "Three Phase 200A Cut out",
+    "Cut out Fuse (MF) 60A": "Cut out Fuse (MF) 60A",
+    "Cut out Fuse (MF) 80A": "Cut out Fuse (MF) 80A",
+    "Cut out Fuse (MF) 100A": "Cut out Fuse (MF) 100A",
+    "11KV FUSE UNIT - C-TYPE": "11KV FUSE UNIT - C-TYPE",
+    "11KV SOLID LINK - C-TYPE": "11KV SOLID LINK - C-TYPE",
+    "11KV OHL ASL C-TYPE RESET 20A 2 SHOT": "11KV OHL ASL C-TYPE RESET 20A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 25A 2 SHOT": "11KV OHL ASL C-TYPE RESET 25A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 40A 1 SHOT": "11KV OHL ASL C-TYPE RESET 40A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 40A 2 SHOT": "11KV OHL ASL C-TYPE RESET 40A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 1 SHOT": "11KV OHL ASL C-TYPE RESET 63A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 2 SHOT": "11KV OHL ASL C-TYPE RESET 63A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 3 SHOT": "11KV OHL ASL C-TYPE RESET 63A 3 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 1 SHOT": "11KV OHL ASL C-TYPE RESET 100A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 2 SHOT": "11KV OHL ASL C-TYPE RESET 100A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 3 SHOT": "11KV OHL ASL C-TYPE RESET 100A 3 SHOT",
+    "11KV OHL FUSE ELEMENT C-TYPE 15A": "11KV OHL FUSE ELEMENT C-TYPE 15A",
+    "11KV OHL FUSE ELEMENT C-TYPE 25A": "11KV OHL FUSE ELEMENT C-TYPE 25A",
+    "11KV OHL FUSE ELEMENT C-TYPE 30A": "11KV OHL FUSE ELEMENT C-TYPE 30A",
+    "11KV OHL FUSE ELEMENT C-TYPE 40A": "11KV OHL FUSE ELEMENT C-TYPE 40A",
+    "11KV OHL FUSE ELEMENT C-TYPE 50A": "11KV OHL FUSE ELEMENT C-TYPE 50A",
+    "11KV OHL ASL DJP-TYPE 20A 2 SHOT": "11KV OHL ASL DJP-TYPE 20A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 25A 1 SHOT": "11KV OHL ASL DJP-TYPE 25A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 25A 2 SHOT": "11KV OHL ASL DJP-TYPE 25A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 40A 1 SHOT": "11KV OHL ASL DJP-TYPE 40A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 40A 2 SHOT": "11KV OHL ASL DJP-TYPE 40A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 1 SHOT": "11KV OHL ASL DJP-TYPE 63A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 2 SHOT": "11KV OHL ASL DJP-TYPE 63A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 3 SHOT": "11KV OHL ASL DJP-TYPE 63A 3 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 1 SHOT": "11KV OHL ASL DJP-TYPE 100A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 2 SHOT": "11KV OHL ASL DJP-TYPE 100A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 3 SHOT": "11KV OHL ASL DJP-TYPE 100A 3 SHOT",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 15A": "11KV OHL FUSE ELEMENT DJP-TYPE 15A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 25A": "11KV OHL FUSE ELEMENT DJP-TYPE 25A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 30A": "11KV OHL FUSE ELEMENT DJP-TYPE 30A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 40A": "11KV OHL FUSE ELEMENT DJP-TYPE 40A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 50A": "11KV OHL FUSE ELEMENT DJP-TYPE 50A",
+}
+
 
 CV31 = {
     "Replace / Fit safety or warning sign, number plates or name plate": "CV31",
@@ -723,11 +803,16 @@ categories = [
     ("CV7_erect", CV7_erect, "Quantity"),
     ("CV7_recover", CV7_recover, "Quantity"),
     ("CV7 Tx", CV7_Tx, "Quantity"),
-    ("CV7 OHL CONDUCTOR", CV7_OHL_CONDUCTOR, "Length (Km)"),
-    ("CV7 OHL CONDUCTOR LV", CV7_OHL_CONDUCTOR_LV, "Length (Km)"),
+    ("transformer", transformer, "Quantity"),
+    ("CV7 OHL CONDUCTOR_instal", CV7_OHL_CONDUCTOR_instal, "Length (Km)"),
+    ("CV7 OHL CONDUCTOR_recover", CV7_OHL_CONDUCTOR_recover, "Length (m)"),
+    ("CV7 OHL CONDUCTOR LV_instal", CV7_OHL_CONDUCTOR_LV, "Length (Km)"),
+    ("CV7 OHL CONDUCTOR LV_recover", CV7_OHL_CONDUCTOR_LV, "Length (m)"),
     ("CV7 SWITCHGEAR", CV7_SWITCHGEAR, "Quantity"),
     ("CV7_UG", CV7_UG, "Quantity"),
     ("CV7_CB", CV7_CB, "Quantity"),
+    ("Switch", Switch, "Quantity"),
+    ("Fuses", Fuses, "Quantity"),
     ("CV31", CV31, "Quantity"),
 ]
 
@@ -1049,14 +1134,18 @@ convert_to_miles = st.checkbox("Convert Equipment/Conductor Length to Miles")
 
 categories = [
     ("CV7_erect", CV7_erect, "Quantity"),
-    ("CV7_erect_lv", CV7_erect_lv, "Quantity"),
     ("CV7_recover", CV7_recover, "Quantity"),
     ("CV7 Tx", CV7_Tx, "Quantity"),
-    ("CV7 OHL CONDUCTOR", CV7_OHL_CONDUCTOR, "Length (Km)"),
-    ("CV7 OHL CONDUCTOR LV", CV7_OHL_CONDUCTOR_LV, "Length (Km)"),
+    ("transformer", transformer, "Quantity"),
+    ("CV7 OHL CONDUCTOR_instal", CV7_OHL_CONDUCTOR_instal, "Length (Km)"),
+    ("CV7 OHL CONDUCTOR_recover", CV7_OHL_CONDUCTOR_recover, "Length (m)"),
+    ("CV7 OHL CONDUCTOR LV_instal", CV7_OHL_CONDUCTOR_LV, "Length (Km)"),
+    ("CV7 OHL CONDUCTOR LV_recover", CV7_OHL_CONDUCTOR_LV, "Length (m)"),
     ("CV7 SWITCHGEAR", CV7_SWITCHGEAR, "Quantity"),
     ("CV7_UG", CV7_UG, "Quantity"),
     ("CV7_CB", CV7_CB, "Quantity"),
+    ("Switch", Switch, "Quantity"),
+    ("Fuses", Fuses, "Quantity"),
     ("CV31", CV31, "Quantity"),
 ]
 
@@ -1105,7 +1194,7 @@ for cat_name, keys, y_label in categories:
 
     # Convert to miles if needed
     y_axis_label = y_label
-    if cat_name in ["Conductors", "Conductors_2"] and convert_to_miles:
+    if cat_name in ["CV7 OHL CONDUCTOR_instal","CV7 OHL CONDUCTOR LV_instal"] and convert_to_miles:
         bar_data['Total'] = bar_data['Total'] * 0.621371
         y_axis_label = "Length (Miles)"
 
