@@ -1321,55 +1321,40 @@ buffer_agg = BytesIO()
 
 with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
 
+    # -----------------------
+    # ---- Ensure Output Sheet ----
+    # -----------------------
     if filtered_df is None or filtered_df.empty:
-        # Ensure at least one sheet exists
+        # Always create at least one sheet
         pd.DataFrame({"Info": ["No data available"]}).to_excel(
             writer, sheet_name="Output", index=False
         )
     else:
-        # ---- Prepare Data ----
+        # --- Your full data export ---
         export_df = filtered_df.rename(columns=column_rename_map).copy()
         export_df["Quantity_used"] = pd.to_numeric(
             export_df.get("Quantity_used", 0), errors="coerce"
         ).fillna(0)
-
         if "qcvi" in export_df.columns:
             export_df["qcvi"] = pd.to_numeric(export_df["qcvi"], errors="coerce").fillna(0)
-
         export_df["item_norm"] = export_df["item"].apply(normalize_item)
 
         # Multiply H-poles
         h_mask = export_df["item"].str.contains("'H' HV/EHV Pole", case=False, na=False)
-        h_recover_mask = export_df["item"].str.contains(
-            "Recover 'A' / 'H' pole, up", case=False, na=False
-        )
+        h_recover_mask = export_df["item"].str.contains("Recover 'A' / 'H' pole, up", case=False, na=False)
         export_df.loc[h_mask | h_recover_mask, "Quantity_used"] *= 2
 
-        # -----------------------
-        # ---- Output Sheet ----
-        # -----------------------
-        export_df_to_write = export_df.copy()
-        export_df_to_write = export_df_to_write.where(pd.notnull(export_df_to_write), "")
+        # --- Output Sheet ---
+        export_df_to_write = export_df.copy().where(pd.notnull(export_df), "")
         if "qcvi" in export_df_to_write.columns:
             export_df_to_write.loc[export_df_to_write["qcvi"] == 0, "qcvi"] = ""
+        export_df_to_write.to_excel(writer, sheet_name="Output", index=False, startrow=0, na_rep="")
 
-        export_df_to_write.to_excel(
-            writer,
-            sheet_name="Output",
-            index=False,
-            startrow=0,  # write at row 0 to avoid openpyxl issues
-            na_rep=""
-        )
-
-        # -----------------------
-        # ---- Summary Sheet ----
-        # -----------------------
+        # --- Summary Sheet ---
         summary_rows = []
-
         for project, df_proj in export_df.groupby("project"):
             df_proj = df_proj.copy()
             df_proj["qcvi"] = pd.to_numeric(df_proj.get("qcvi", 0), errors="coerce").fillna(0)
-
             summary_rows.append({
                 "Project": project,
                 "CV7_erect": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_erect.keys()])]["Quantity_used"].sum(),
@@ -1385,23 +1370,21 @@ with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
                 "Total Value (£)": df_proj.get("total", pd.Series([0])).sum(),
                 "QCVI": df_proj["qcvi"].sum()
             })
-
         final_summary = pd.DataFrame(summary_rows).sort_values("Project")
         if not final_summary.empty:
             total_row = final_summary.select_dtypes(include="number").sum().to_dict()
             total_row["Project"] = "Total"
             total_row["QCVI"] = final_summary["QCVI"].sum()
             final_summary = pd.concat([final_summary, pd.DataFrame([total_row])], ignore_index=True)
-
         final_summary.pop("QCVI")
         final_summary_to_write = final_summary.where(pd.notnull(final_summary), "")
+        # Ensure at least one summary sheet
+        if final_summary_to_write.empty:
+            pd.DataFrame({"Info": ["No summary available"]}).to_excel(writer, sheet_name="Summary", index=False)
+        else:
+            final_summary_to_write.to_excel(writer, sheet_name="Summary", index=False, startrow=0)
 
-        if not final_summary_to_write.empty:
-            final_summary_to_write.to_excel(writer, sheet_name="Summary", index=False, startrow=0, na_rep="")
-
-        # -----------------------
-        # ---- Breakdown Sheets ----
-        # -----------------------
+        # --- Breakdown sheets ---
         breakdown_columns = {
             "CV7_erect": CV7_erect.keys(),
             "CV7_erect_lv": CV7_erect_lv.keys(),
@@ -1418,95 +1401,11 @@ with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
         for col_name, keys in breakdown_columns.items():
             df_breakdown = export_df[export_df["item_norm"].isin([normalize_item(k) for k in keys])]
             if df_breakdown.empty:
-                continue  # skip empty sheets
-
-            cols_to_include_sheet = [
-                "item","comment","Quantity_used","qcvi","material_code","pole",
-                "datetouse_dt","done","District","project","Project Manager",
-                "location_map","Circuit","Segment","sourcefile"
-            ]
-            df_breakdown = df_breakdown[[c for c in cols_to_include_sheet if c in df_breakdown.columns]]
+                continue
             df_breakdown_to_write = df_breakdown.where(pd.notnull(df_breakdown), "")
+            df_breakdown_to_write.to_excel(writer, sheet_name=col_name[:31], index=False, startrow=0)
 
-            if "qcvi" in df_breakdown_to_write.columns:
-                df_breakdown_to_write["qcvi"] = pd.to_numeric(df_breakdown_to_write["qcvi"], errors="coerce")
-                df_breakdown_to_write.loc[df_breakdown_to_write["qcvi"] == 0, "qcvi"] = ""
-
-            df_breakdown_to_write.to_excel(writer, sheet_name=col_name[:31], index=False, startrow=0, na_rep="")
-
-        # -----------------------
-        # ---- Formatting + Images ----
-        # -----------------------
-        IMG_HEIGHT = 120
-        IMG_WIDTH_SMALL = 120
-        IMG_WIDTH_LARGE = IMG_WIDTH_SMALL * 3
-
-        header_font = Font(bold=True, size=16)
-        header_fill = PatternFill(start_color="00CCFF", end_color="00CCFF", fill_type="solid")
-
-        thin_side = Side(style="thin")
-        medium_side = Side(style="medium")
-        thick_side = Side(style="thick")
-
-        light_grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-        white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-        red_font = Font(color="FF0000")
-        green_font = Font(color="00AA00")
-        black_font = Font(color="000000")
-
-        for ws in writer.sheets.values():
-            ws.row_dimensions[1].height = 90
-
-            # Images
-            img1 = XLImage("Images/GaeltecImage.png")
-            img1.width = IMG_WIDTH_SMALL
-            img1.height = IMG_HEIGHT
-            img1.anchor = "B1"
-
-            img2 = XLImage("Images/SPEN.png")
-            img2.width = IMG_WIDTH_LARGE
-            img2.height = IMG_HEIGHT
-            img2.anchor = "A1"
-
-            ws.add_image(img1)
-            ws.add_image(img2)
-
-            max_col = ws.max_column
-
-            # Header formatting
-            for col_idx, cell in enumerate(ws[1], start=1):  # headers are now at row 1
-                cell.font = header_font
-                cell.fill = header_fill
-                ws.column_dimensions[get_column_letter(col_idx)].width = 60 if col_idx == 1 else 20
-                cell.border = Border(
-                    left=thick_side if col_idx == 1 else medium_side,
-                    right=thick_side if col_idx == max_col else medium_side,
-                    top=thick_side,
-                    bottom=thick_side
-                )
-
-            # QCVI column
-            qcvi_col_idx = None
-            for col_idx, cell in enumerate(ws[1], start=1):
-                if cell.value == "qcvi":
-                    qcvi_col_idx = col_idx
-                    break
-
-            # Row formatting
-            for row_idx in range(2, ws.max_row + 1):
-                fill = light_grey_fill if row_idx % 2 == 0 else white_fill
-                for col_idx in range(1, ws.max_column + 1):
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    cell.fill = fill
-                    cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
-
-                    if qcvi_col_idx and col_idx == qcvi_col_idx and cell.value not in ("", None):
-                        try:
-                            val = float(cell.value)
-                            cell.font = green_font if val > 0 else red_font if val < 0 else black_font
-                        except ValueError:
-                            cell.font = black_font
-
+# After writing, buffer is ready
 buffer_agg.seek(0)
 st.download_button(
     label="📥 Download Excel (Output Details)",
