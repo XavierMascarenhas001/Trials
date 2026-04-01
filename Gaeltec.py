@@ -1299,8 +1299,15 @@ cv8_df['pole_str'] = cv8_df['pole'].astype(str)
 cv8_df = cv8_df[~cv8_df['pole_str'].isin(cv7_poles)]
 
 # --- Step 3: Clean numeric values ---
-cv8_df['qvci_clean'] = pd.to_numeric(cv8_df.get('qvci', 0), errors='coerce').fillna(0)
-cv8_df['qsub_clean'] = pd.to_numeric(cv8_df.get('qsub', 0), errors='coerce').fillna(0)
+cv8_df['qvci_clean'] = pd.to_numeric(
+    cv8_df['qvci'] if 'qvci' in cv8_df.columns else pd.Series(0, index=cv8_df.index),
+    errors='coerce'
+).fillna(0)
+
+cv8_df['qsub_clean'] = pd.to_numeric(
+    cv8_df['qsub'] if 'qsub' in cv8_df.columns else pd.Series(0, index=cv8_df.index),
+    errors='coerce'
+).fillna(0)
 
 # --- Step 4: Split HV / LV ---
 cv8_df['type_cv8'] = cv8_df['project'].astype(str).str.contains("LV", case=False, na=False)
