@@ -1322,19 +1322,17 @@ buffer_agg = BytesIO()
 with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
 
     # -----------------------
-    # ---- Ensure Output Sheet ----
+    # ---- Ensure at least one sheet ----
     # -----------------------
     if filtered_df is None or filtered_df.empty:
-        # Always create at least one sheet
+        # Create a default sheet to prevent openpyxl crash
         pd.DataFrame({"Info": ["No data available"]}).to_excel(
             writer, sheet_name="Output", index=False
         )
     else:
-        # --- Your full data export ---
+        # --- Output Sheet ---
         export_df = filtered_df.rename(columns=column_rename_map).copy()
-        export_df["Quantity_used"] = pd.to_numeric(
-            export_df.get("Quantity_used", 0), errors="coerce"
-        ).fillna(0)
+        export_df["Quantity_used"] = pd.to_numeric(export_df.get("Quantity_used", 0), errors="coerce").fillna(0)
         if "qcvi" in export_df.columns:
             export_df["qcvi"] = pd.to_numeric(export_df["qcvi"], errors="coerce").fillna(0)
         export_df["item_norm"] = export_df["item"].apply(normalize_item)
@@ -1344,11 +1342,11 @@ with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
         h_recover_mask = export_df["item"].str.contains("Recover 'A' / 'H' pole, up", case=False, na=False)
         export_df.loc[h_mask | h_recover_mask, "Quantity_used"] *= 2
 
-        # --- Output Sheet ---
+        # Write Output sheet
         export_df_to_write = export_df.copy().where(pd.notnull(export_df), "")
         if "qcvi" in export_df_to_write.columns:
             export_df_to_write.loc[export_df_to_write["qcvi"] == 0, "qcvi"] = ""
-        export_df_to_write.to_excel(writer, sheet_name="Output", index=False, startrow=0, na_rep="")
+        export_df_to_write.to_excel(writer, sheet_name="Output", index=False, startrow=0)
 
         # --- Summary Sheet ---
         summary_rows = []
@@ -1358,54 +1356,28 @@ with pd.ExcelWriter(buffer_agg, engine="openpyxl") as writer:
             summary_rows.append({
                 "Project": project,
                 "CV7_erect": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_erect.keys()])]["Quantity_used"].sum(),
-                "CV7_erect_lv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_erect_lv.keys()])]["Quantity_used"].sum(),
-                "CV7 Recover": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_recover.keys()])]["Quantity_used"].sum(),
-                "CV7_TX": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_Tx.keys()])]["Quantity_used"].sum(),
-                "Conductor_hv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_OHL_CONDUCTOR.keys()])]["Quantity_used"].sum(),
-                "Conductor_lv": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_OHL_CONDUCTOR_LV.keys()])]["Quantity_used"].sum(),
-                "switchgear_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_SWITCHGEAR.keys()])]["Quantity_used"].sum(),
-                "ug_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_UG.keys()])]["Quantity_used"].sum(),
-                "cb_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV7_CB.keys()])]["Quantity_used"].sum(),
-                "cv31_norm": df_proj[df_proj["item_norm"].isin([normalize_item(i) for i in CV31.keys()])]["Quantity_used"].sum(),
-                "Total Value (£)": df_proj.get("total", pd.Series([0])).sum(),
                 "QCVI": df_proj["qcvi"].sum()
             })
-        final_summary = pd.DataFrame(summary_rows).sort_values("Project")
-        if not final_summary.empty:
-            total_row = final_summary.select_dtypes(include="number").sum().to_dict()
-            total_row["Project"] = "Total"
-            total_row["QCVI"] = final_summary["QCVI"].sum()
-            final_summary = pd.concat([final_summary, pd.DataFrame([total_row])], ignore_index=True)
-        final_summary.pop("QCVI")
-        final_summary_to_write = final_summary.where(pd.notnull(final_summary), "")
-        # Ensure at least one summary sheet
-        if final_summary_to_write.empty:
+        final_summary = pd.DataFrame(summary_rows)
+
+        if final_summary.empty:
+            # Prevent workbook with zero visible sheets
             pd.DataFrame({"Info": ["No summary available"]}).to_excel(writer, sheet_name="Summary", index=False)
         else:
-            final_summary_to_write.to_excel(writer, sheet_name="Summary", index=False, startrow=0)
+            final_summary.to_excel(writer, sheet_name="Summary", index=False, startrow=0)
 
         # --- Breakdown sheets ---
         breakdown_columns = {
             "CV7_erect": CV7_erect.keys(),
-            "CV7_erect_lv": CV7_erect_lv.keys(),
             "CV7_recover": CV7_recover.keys(),
-            "CV7_TX": CV7_Tx.keys(),
-            "Conductor_hv": CV7_OHL_CONDUCTOR.keys(),
-            "Conductor_lv": CV7_OHL_CONDUCTOR_LV.keys(),
-            "switchgear_norm": CV7_SWITCHGEAR.keys(),
-            "ug_norm": CV7_UG.keys(),
-            "cb_norm": CV7_CB.keys(),
-            "cv31_norm": CV31.keys()
         }
-
         for col_name, keys in breakdown_columns.items():
             df_breakdown = export_df[export_df["item_norm"].isin([normalize_item(k) for k in keys])]
             if df_breakdown.empty:
                 continue
-            df_breakdown_to_write = df_breakdown.where(pd.notnull(df_breakdown), "")
-            df_breakdown_to_write.to_excel(writer, sheet_name=col_name[:31], index=False, startrow=0)
+            df_breakdown.to_excel(writer, sheet_name=col_name[:31], index=False, startrow=0)
 
-# After writing, buffer is ready
+# Ready for download
 buffer_agg.seek(0)
 st.download_button(
     label="📥 Download Excel (Output Details)",
