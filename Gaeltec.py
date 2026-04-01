@@ -1214,7 +1214,7 @@ st.markdown("""
 # --------------------------------------------------
 # DISPLAY SECTION
 # --------------------------------------------------
-st.markdown("<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>", unsafe_allow_html=True)
     # ✅ REQUIRED COLUMNS (UPDATED)
     required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
     existing_cols = [c for c in required_cols if c in filtered_df.columns]
