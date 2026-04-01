@@ -55,7 +55,7 @@ def prepare_dataframe(df):
     else:
         df['datetouse_dt'] = pd.NaT
         df['datetouse_date'] = None
-        df['datetouse_display'] = "Unplanned"
+        df['datetouse_display'] = "Missing"
 
     # Numeric columns
     for col in ['total', 'orig']:
@@ -252,7 +252,7 @@ def preprocess_df(df):
         df['datetouse_display'] = df['datetouse_dt'].dt.strftime("%d/%m/%Y")
     else:
         df['datetouse_dt'] = pd.NaT
-        df['datetouse_display'] = "Unplanned"
+        df['datetouse_display'] = "Missing"
 
     # Add other preprocessing here if needed
     # e.g., stripping strings, renaming columns, converting numbers
@@ -979,18 +979,18 @@ if 'datetouse' in filtered_df.columns:
     filtered_df['datetouse_display'] = filtered_df['datetouse_dt'].dt.strftime("%d/%m/%Y")
 else:
     filtered_df['datetouse_dt'] = pd.NaT
-    filtered_df['datetouse_display'] = "Unplanned"
+    filtered_df['datetouse_display'] = "Missing"
 
 
 filter_type = st.sidebar.selectbox(
     "Filter by Date",
-    ["Single Day", "Week", "Month", "Year", "Custom Range", "Unplanned"]
+    ["Single Day", "Week", "Month", "Year", "Custom Range", "Missing"]
 )
 
 date_range_str = ""
-if filter_type == "Unplanned":
+if filter_type == "Missing":
     filtered_df = filtered_df[filtered_df['datetouse_dt'].isna()]
-    date_range_str = "Unplanned"
+    date_range_str = "Missing"
 else:
     filtered_df = filtered_df[filtered_df['datetouse_dt'].notna()]
 
@@ -1185,7 +1185,7 @@ for cat_name, keys, y_label in categories:
     for col in ['datetouse', 'plan1', 'done']:
         if col in sub_df.columns:
             sub_df[col] = pd.to_datetime(sub_df[col], errors='coerce').dt.strftime("%d/%m/%Y")
-            sub_df[col] = sub_df[col].fillna("Unplanned")
+            sub_df[col] = sub_df[col].fillna("Missing")
 
     # Clean numeric columns
     sub_df['qvci_clean'] = pd.to_numeric(sub_df['qvci'] if 'qvci' in sub_df.columns else pd.Series(0, index=sub_df.index), errors='coerce').fillna(0)
@@ -1387,7 +1387,7 @@ if 'project' in existing_cols:
                 for _, row in segments.iterrows():
                     district = str(row.get("shire", ""))
                     dt = row.get("datetouse_dt", None)
-                    date = dt.strftime("%d/%m/%Y") if pd.notna(dt) else "Unplanned"
+                    date = dt.strftime("%d/%m/%Y") if pd.notna(dt) else "Missing"
                     circuit = str(row.get("segmentcode", ""))
                     segment = str(row.get("segmentdesc", ""))
                     display_lines.append(f"{district} | {date} | {circuit} | {segment}")
@@ -1481,7 +1481,7 @@ if 'project' in existing_cols:
                         if pd.notna(dt):
                             date = dt.strftime("%d/%m/%Y")  # Day/Month/Year
                         else:
-                            date = "Unplanned"
+                            date = "Missing"
                         circuit = str(row.get("segmentcode", ""))
                         segment = str(row.get("segmentdesc", ""))
 
