@@ -1190,6 +1190,24 @@ st.markdown("""
             padding-bottom: 1rem;
             max-width: 100%;
         }
+        /* Scrollable table-style display */
+        .scroll-box {
+            max-height: 400px;
+            overflow-y: auto;
+            overflow-x: auto;
+            padding: 12px;
+            border: 1px solid #444;
+            background-color: #111;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: nowrap;
+            color: #fff;
+        }
+        .scroll-box span {
+            display: inline-block;
+            min-width: 120px; /* column width */
+            padding-right: 20px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
