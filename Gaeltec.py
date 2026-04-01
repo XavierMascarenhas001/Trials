@@ -443,6 +443,8 @@ def generate_excel_styled_multilevel(filtered_df, poles_df=None):
     # Set row 1 height to fit images
     ws.row_dimensions[1].height = IMG_HEIGHT * 0.75  # approximate pixels → Excel points
     ws_summary.row_dimensions[1].height = IMG_HEIGHT * 0.75
+    img1 = XLImage("Images/GaeltecImage.png")
+    img2 = XLImage("Images/SPEN.png")
 
     # Position images (row 1)
     img1.anchor = "B1"
