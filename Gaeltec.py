@@ -1281,24 +1281,42 @@ for cat_name, keys, y_label in categories:
 # CV8 CALCULATION (EXCLUDE CV7 POLES)
 # --------------------------------------------------
 
-# --- Step 1: Get all poles already used in CV7 ---
-cv7_mask = filtered_df['item'].astype(str).str.contains(
-    '|'.join([*CV7_erect.keys(), *CV7_erect_lv.keys(), *CV7_recover.keys()]),
-    case=False, na=False
-)
+# --- 1. COLLECT CV7 POLES ---
+cv7_poles_list = []
 
-cv7_df = filtered_df[cv7_mask]
+for df_name in ['cv7_erect_df', 'cv7_erect_lv_df', 'cv7_recover_df']:
+    if df_name in locals():
+        df_temp = locals()[df_name]
+        if 'pole' in df_temp.columns:
+            cv7_poles_list.append(df_temp[['pole']])
 
-# Use 'pole' as unique identifier (change if needed)
-cv7_poles = set(cv7_df['pole'].dropna().astype(str))
+if len(cv7_poles_list) > 0:
+    cv7_poles = pd.concat(cv7_poles_list)['pole'].dropna().unique()
+else:
+    cv7_poles = []
 
-# --- Step 2: Get remaining rows (CV8 candidates) ---
+# --- 2. BUILD CV8 BASE ---
 cv8_df = filtered_df.copy()
-cv8_df['pole_str'] = cv8_df['pole'].astype(str)
 
-cv8_df = cv8_df[~cv8_df['pole_str'].isin(cv7_poles)]
+if 'pole' in cv8_df.columns:
+    cv8_df = cv8_df[~cv8_df['pole'].isin(cv7_poles)]
 
-# --- Step 3: Clean numeric values ---
+# --- 3. REMOVE EMPTY POLES ---
+cv8_df = cv8_df.dropna(subset=['pole'])
+
+# --- 4. NORMALIZE DATES ---
+cv8_df['datetouse_dt'] = pd.to_datetime(
+    cv8_df.get('datetouse', pd.NaT), errors='coerce'
+).dt.normalize()
+
+# --- 5. REMOVE DUPLICATES (1 POLE = 1 ROW) ---
+cv8_df = cv8_df.sort_values(by='datetouse_dt', ascending=False)
+cv8_df = cv8_df.drop_duplicates(subset=['pole'], keep='first')
+
+# ==================================================
+# CLEAN NUMERIC COLUMNS (NO ERRORS)
+# ==================================================
+
 cv8_df['qvci_clean'] = pd.to_numeric(
     cv8_df['qvci'] if 'qvci' in cv8_df.columns else pd.Series(0, index=cv8_df.index),
     errors='coerce'
@@ -1309,102 +1327,126 @@ cv8_df['qsub_clean'] = pd.to_numeric(
     errors='coerce'
 ).fillna(0)
 
-# --- Step 4: Split HV / LV ---
-cv8_df['type_cv8'] = cv8_df['project'].astype(str).str.contains("LV", case=False, na=False)
-cv8_df['type_cv8'] = cv8_df['type_cv8'].map({True: "CV8_LV", False: "CV8_HV"})
+# ==================================================
+# SPLIT CV8 INTO HV / LV
+# ==================================================
 
-# --- Step 5: Aggregate like bar chart ---
-cv8_summary = cv8_df.groupby('type_cv8').agg(
+cv8_df['CV8_type'] = cv8_df['project'].str.contains("lv", case=False, na=False)
+cv8_df['CV8_type'] = cv8_df['CV8_type'].map({
+    True: "CV8_LV",
+    False: "CV8_HV"
+})
+
+# ==================================================
+# CV8 BAR CHART
+# ==================================================
+
+cv8_bar = cv8_df.groupby('CV8_type').agg(
     Total=('qsub_clean', 'sum'),
     Variation=('qvci_clean', 'sum')
 ).reset_index()
 
-cv8_summary.rename(columns={'type_cv8': 'Mapped'}, inplace=True)
+cv8_bar['PositiveVar'] = cv8_bar['Variation'].clip(lower=0)
+cv8_bar['NegativeVar'] = cv8_bar['Variation'].clip(upper=0)
 
-# Split variation
-cv8_summary['PositiveVar'] = cv8_summary['Variation'].clip(lower=0)
-cv8_summary['NegativeVar'] = cv8_summary['Variation'].clip(upper=0)
+st.subheader(f"🔹 CV8 — Total: {cv8_bar['Total'].sum():,.2f}")
 
-# --------------------------------------------------
-# DISPLAY CV8
-# --------------------------------------------------
-st.header("⚡ CV8 (Filtered - No Double Count)")
+fig = go.Figure()
 
-if not cv8_summary.empty:
+fig.add_bar(
+    x=cv8_bar['CV8_type'],
+    y=cv8_bar['Total'],
+    name="Quantity",
+    text=cv8_bar['Total'],
+    texttemplate='%{y:,.1f}',
+    textposition='outside'
+)
 
-    grand_total = cv8_summary['Total'].sum()
-    st.subheader(f"🔹 CV8 — Total: {grand_total:,.2f}")
+fig.add_bar(
+    x=cv8_bar['CV8_type'],
+    y=cv8_bar['PositiveVar'],
+    name="Positive Variation"
+)
 
-    # Bar chart (same style)
-    fig = go.Figure()
+fig.add_bar(
+    x=cv8_bar['CV8_type'],
+    y=cv8_bar['NegativeVar'],
+    name="Negative Variation"
+)
 
-    fig.add_bar(
-        x=cv8_summary['Mapped'],
-        y=cv8_summary['Total'],
-        name="Quantity",
-        marker_color="#4C78A8",
-        text=cv8_summary['Total'],
-        texttemplate='%{y:,.1f}',
-        textposition='outside'
-    )
+fig.update_layout(
+    barmode='relative',
+    title="CV8 Overview",
+    xaxis_title="Type",
+    yaxis_title="Quantity"
+)
 
-    fig.add_bar(
-        x=cv8_summary['Mapped'],
-        y=cv8_summary['PositiveVar'],
-        name="Positive Variation",
-        marker_color="green"
-    )
+st.plotly_chart(fig, use_container_width=True)
 
-    fig.add_bar(
-        x=cv8_summary['Mapped'],
-        y=cv8_summary['NegativeVar'],
-        name="Negative Variation",
-        marker_color="red"
-    )
+# ==================================================
+# DRILL-DOWN SECTION
+# ==================================================
 
-    fig.update_layout(
-        barmode='relative',
-        title="CV8 Overview",
-        xaxis_title="Mapping",
-        yaxis_title="Quantity",
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
+with st.expander("🔍 Click to explore CV8 details", expanded=False):
 
-    st.plotly_chart(fig, use_container_width=True)
+    cols = st.columns(2)
 
-    # --------------------------------------------------
-    # DRILL-DOWN TABLE (same columns as your display)
-    # --------------------------------------------------
-    st.subheader("🔍 CV8 Details")
+    for idx, val in enumerate(cv8_bar['CV8_type']):
+        with cols[idx % 2]:
+            if st.button(f"📊 {val}", key=f"cv8_btn_{val}"):
+                st.session_state["selected_cv8"] = val
+                st.rerun()
 
+selected_cv8 = st.session_state.get("selected_cv8")
+
+if selected_cv8:
+    st.subheader(f"Details for: **{selected_cv8}**")
+
+    if st.button("❌ Clear CV8 Selection"):
+        del st.session_state["selected_cv8"]
+        st.rerun()
+
+    detail_df = cv8_df[cv8_df['CV8_type'] == selected_cv8].copy()
+
+    # ==================================================
+    # FORMAT DATES (REMOVE TIME)
+    # ==================================================
+    for col in ['plan1', 'done']:
+        if col in detail_df.columns:
+            detail_df[col] = pd.to_datetime(
+                detail_df[col], errors='coerce'
+            ).dt.strftime("%d/%m/%Y")
+
+    # ==================================================
+    # SELECT & ORDER COLUMNS (YOUR EXACT REQUEST)
+    # ==================================================
     display_columns = [
         'shire', 'project', 'segmentdesc', 'item', 'comment',
         'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done'
     ]
 
-    display_columns = [c for c in display_columns if c in cv8_df.columns]
+    display_columns = [c for c in display_columns if c in detail_df.columns]
 
-    display_df = cv8_df[display_columns].copy()
+    display_df = detail_df[display_columns].copy()
 
-    # Rename for clarity
     display_df.rename(columns={
         'shire': 'District',
         'segmentdesc': 'Segment',
-        'qty': 'Quantity',
-        'qsub': 'Quantity Used'
+        'qty': 'Quantity'
     }, inplace=True)
 
-    # Format dates (IMPORTANT FIX)
-    for col in ['plan1', 'done']:
-        if col in display_df.columns:
-            display_df[col] = pd.to_datetime(display_df[col], errors='coerce').dt.strftime("%d/%m/%Y")
-            display_df[col] = display_df[col].fillna("Unplanned")
-
+    # ==================================================
+    # DISPLAY TABLE
+    # ==================================================
+    st.write(f"**Total unique poles:** {len(display_df)}")
     st.dataframe(display_df, use_container_width=True)
 
-else:
-    st.info("No CV8 records found after excluding CV7 poles.")
+# ==================================================
+# DEBUG (TEMP - REMOVE LATER)
+# ==================================================
+
+st.write("CV8 rows:", len(cv8_df))
+st.write("CV8 unique poles:", cv8_df['pole'].nunique())
 
 # --------------------------------------------------
 # PAGE / LAYOUT (WIDER DISPLAY)
