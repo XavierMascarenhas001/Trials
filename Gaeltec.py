@@ -1532,36 +1532,39 @@ def sanitize_sheet_name(name: str) -> str:
 # -------------------
 def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
     output = io.BytesIO()
+    
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
 
-        # Bar chart sheets
+        # 1️⃣ Bar chart sheets
         for cat_name, df in bar_data_dict.items():
             if df.empty:
                 continue
+            df = df.fillna("")
             sheet_name = sanitize_sheet_name(cat_name)
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # Drill-down sheets
+        # 2️⃣ Drill-down sheets
         for cat_name, df in drilldown_dict.items():
             if df.empty:
                 continue
+            df = df.fillna("")
             sheet_name = sanitize_sheet_name(f"{cat_name}_details")
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # Combined filtered data
+        # 3️⃣ Combined filtered data
         if not filtered_df.empty:
-            filtered_df.to_excel(writer, sheet_name="Combined_Data", index=False)
+            df = filtered_df.fillna("")
+            df.to_excel(writer, sheet_name="Combined_Data", index=False)
 
-        # Project summary (sum numeric columns)
+        # 4️⃣ Project summary
         if 'project' in filtered_df.columns:
             numeric_cols = filtered_df.select_dtypes(include='number').columns.tolist()
             if numeric_cols:
                 project_summary = filtered_df.groupby('project', as_index=False)[numeric_cols].sum()
                 project_summary.to_excel(writer, sheet_name="Project_Summary", index=False)
 
-        excel_data = output.getvalue()
-
-    return excel_data
+    # Only now get bytes
+    return output.getvalue()
 
 # -------------------
 # DOWNLOAD BUTTON
