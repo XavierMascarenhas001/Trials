@@ -1311,36 +1311,40 @@ categories = [
 # -------------------------------
 # FUNCTION TO PLOT BAR CHARTS
 # -------------------------------
-def plot_bar_chart(df, category_name, y_label="Quantity"):
+def plot_bar_chart(df, category_name, y_label="Quantity", x_col="Mapped"):
+    """
+    df: dataframe with columns [x_col, 'Total', 'PositiveVar', 'NegativeVar']
+    x_col: name of column to use for x-axis (default 'Mapped')
+    """
     if df.empty:
         st.warning(f"No data for {category_name}")
         return
 
     fig = go.Figure()
     fig.add_bar(
-        x=df['Mapped'], y=df['Total'],
+        x=df[x_col], y=df['Total'],
         name="Quantity", marker_color="#4C78A8", text=df['Total'],
         texttemplate='%{y}', textposition='outside'
     )
     fig.add_bar(
-        x=df['Mapped'], y=df['PositiveVar'],
+        x=df[x_col], y=df['PositiveVar'],
         name="Positive Variation", marker_color="green"
     )
     fig.add_bar(
-        x=df['Mapped'], y=df['NegativeVar'],
+        x=df[x_col], y=df['NegativeVar'],
         name="Negative Variation", marker_color="red"
     )
     fig.update_layout(
         barmode='relative',
         title=f"{category_name} Overview",
-        xaxis_title="Mapping",
+        xaxis_title=x_col,
         yaxis_title=y_label,
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         yaxis=dict(gridcolor='rgba(255,255,255,0.3)')
     )
     st.plotly_chart(fig, use_container_width=True, height=500)
-
+    
 # -------------------------------
 # CV7 LOOP
 # -------------------------------
@@ -1381,7 +1385,7 @@ for cat_name, keys, y_label in categories:
     bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
     bar_data['NegativeVar'] = bar_data['Variation'].clip(upper=0)
 
-    plot_bar_chart(bar_data, cat_name, y_label)
+    plot_bar_chart(cv8_bar, "CV8", y_label="Unique Poles", x_col="CV8_type")
 
 # -------------------------------
 # CV8 SPECIAL LOGIC
