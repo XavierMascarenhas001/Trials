@@ -1550,9 +1550,8 @@ def generate_excel_export(bar_data_dict, drilldown_dict):
             summary_df['Grand_Total'] = summary_df[total_cols].sum(axis=1)
             summary_df.to_excel(writer, sheet_name="Project Summary", index=False)
 
-        writer.save()
-        return output.getvalue()
-
+    # No writer.save() here — the context manager handles it
+    return output.getvalue()
 # -------------------------------
 # 4️⃣ Download button
 # -------------------------------
