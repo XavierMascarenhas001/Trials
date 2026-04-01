@@ -761,6 +761,18 @@ CV31 = {
 
 CV8 = {
     "Tighten existing stay.": "CV8",
+    "Erect/Replace stay above ground only.": "CV8",
+    "Erect/Replace stay complete including block or driven type anchor": "CV8",
+    "Erect/Replace stay complete including rock type anchor": "CV8",
+    "Retrofit structure with Anchor Clamp fitting for Section / Angle / Terminal support": "CV8",
+    "Erect Single Crossarm to single pole.": "CV8",
+    "Erect Double Crossarm to single pole": "CV8",
+    "Erect Double Crossarm 'H' Pole formation": "CV8",
+    "Remove Steelwork crossarm item only": "CV8",
+    "Change 11kV Insulators to avoid contamination from old conductor": "CV8",
+    "Change 33kV Insulators to avoid contamination from old conductor": "CV8",
+    "Replace tension insulator, 11kV.": "CV8",
+    "Replace tension insulator, 33kV.": "CV8",
     "Replace / Fit high visibility stay guard": "CV8",
     "Additional cost for fitting Stay Outrigger Bracket": "CV8",
     "Additional cost for fitting Angle / Terminal stay attachment plates on Heavy Construction as SP4009862": "CV8",
@@ -1265,7 +1277,127 @@ for cat_name, keys, y_label in categories:
         st.dataframe(display_df, use_container_width=True)
 
 
+# --------------------------------------------------
+# CV8 CALCULATION (EXCLUDE CV7 POLES)
+# --------------------------------------------------
 
+# --- Step 1: Get all poles already used in CV7 ---
+cv7_mask = filtered_df['item'].astype(str).str.contains(
+    '|'.join([*CV7_erect.keys(), *CV7_erect_lv.keys(), *CV7_recover.keys()]),
+    case=False, na=False
+)
+
+cv7_df = filtered_df[cv7_mask]
+
+# Use 'pole' as unique identifier (change if needed)
+cv7_poles = set(cv7_df['pole'].dropna().astype(str))
+
+# --- Step 2: Get remaining rows (CV8 candidates) ---
+cv8_df = filtered_df.copy()
+cv8_df['pole_str'] = cv8_df['pole'].astype(str)
+
+cv8_df = cv8_df[~cv8_df['pole_str'].isin(cv7_poles)]
+
+# --- Step 3: Clean numeric values ---
+cv8_df['qvci_clean'] = pd.to_numeric(cv8_df.get('qvci', 0), errors='coerce').fillna(0)
+cv8_df['qsub_clean'] = pd.to_numeric(cv8_df.get('qsub', 0), errors='coerce').fillna(0)
+
+# --- Step 4: Split HV / LV ---
+cv8_df['type_cv8'] = cv8_df['project'].astype(str).str.contains("LV", case=False, na=False)
+cv8_df['type_cv8'] = cv8_df['type_cv8'].map({True: "CV8_LV", False: "CV8_HV"})
+
+# --- Step 5: Aggregate like bar chart ---
+cv8_summary = cv8_df.groupby('type_cv8').agg(
+    Total=('qsub_clean', 'sum'),
+    Variation=('qvci_clean', 'sum')
+).reset_index()
+
+cv8_summary.rename(columns={'type_cv8': 'Mapped'}, inplace=True)
+
+# Split variation
+cv8_summary['PositiveVar'] = cv8_summary['Variation'].clip(lower=0)
+cv8_summary['NegativeVar'] = cv8_summary['Variation'].clip(upper=0)
+
+# --------------------------------------------------
+# DISPLAY CV8
+# --------------------------------------------------
+st.header("⚡ CV8 (Filtered - No Double Count)")
+
+if not cv8_summary.empty:
+
+    grand_total = cv8_summary['Total'].sum()
+    st.subheader(f"🔹 CV8 — Total: {grand_total:,.2f}")
+
+    # Bar chart (same style)
+    fig = go.Figure()
+
+    fig.add_bar(
+        x=cv8_summary['Mapped'],
+        y=cv8_summary['Total'],
+        name="Quantity",
+        marker_color="#4C78A8",
+        text=cv8_summary['Total'],
+        texttemplate='%{y:,.1f}',
+        textposition='outside'
+    )
+
+    fig.add_bar(
+        x=cv8_summary['Mapped'],
+        y=cv8_summary['PositiveVar'],
+        name="Positive Variation",
+        marker_color="green"
+    )
+
+    fig.add_bar(
+        x=cv8_summary['Mapped'],
+        y=cv8_summary['NegativeVar'],
+        name="Negative Variation",
+        marker_color="red"
+    )
+
+    fig.update_layout(
+        barmode='relative',
+        title="CV8 Overview",
+        xaxis_title="Mapping",
+        yaxis_title="Quantity",
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)'
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --------------------------------------------------
+    # DRILL-DOWN TABLE (same columns as your display)
+    # --------------------------------------------------
+    st.subheader("🔍 CV8 Details")
+
+    display_columns = [
+        'shire', 'project', 'segmentdesc', 'item', 'comment',
+        'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done'
+    ]
+
+    display_columns = [c for c in display_columns if c in cv8_df.columns]
+
+    display_df = cv8_df[display_columns].copy()
+
+    # Rename for clarity
+    display_df.rename(columns={
+        'shire': 'District',
+        'segmentdesc': 'Segment',
+        'qty': 'Quantity',
+        'qsub': 'Quantity Used'
+    }, inplace=True)
+
+    # Format dates (IMPORTANT FIX)
+    for col in ['plan1', 'done']:
+        if col in display_df.columns:
+            display_df[col] = pd.to_datetime(display_df[col], errors='coerce').dt.strftime("%d/%m/%Y")
+            display_df[col] = display_df[col].fillna("Unplanned")
+
+    st.dataframe(display_df, use_container_width=True)
+
+else:
+    st.info("No CV8 records found after excluding CV7 poles.")
 
 # --------------------------------------------------
 # PAGE / LAYOUT (WIDER DISPLAY)
