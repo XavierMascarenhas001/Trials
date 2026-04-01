@@ -1510,41 +1510,26 @@ with center_col:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
-    """
-    Generate Excel with multiple sheets:
-    - bar_data_dict: {category_name: bar_data DataFrame}
-    - drilldown_dict: {category_name: display_df DataFrame for selected drill-downs}
-    - filtered_df: filtered full dataset
-    """
+def generate_excel_export(bar_data_dict, drilldown_dict):
     output = BytesIO()
-
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # -------------------------------
-        # 1️⃣ One sheet per bar chart
-        # -------------------------------
+        # 3a. Bar chart sheets
         for cat_name, bar_df in bar_data_dict.items():
             if not bar_df.empty:
-                sheet_name = cat_name[:31]  # Excel sheet name limit
+                sheet_name = cat_name[:31]
                 bar_df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # -------------------------------
-        # 2️⃣ Drill-down / Selected data
-        # -------------------------------
+        # 3b. Drill-down data sheet
         drilldown_combined = pd.DataFrame()
         for cat_name, display_df in drilldown_dict.items():
             if not display_df.empty:
-                display_df_copy = display_df.copy()
-                display_df_copy.insert(0, "Category", cat_name)
-                drilldown_combined = pd.concat([drilldown_combined, display_df_copy], ignore_index=True)
-
+                df_copy = display_df.copy()
+                df_copy.insert(0, "Category", cat_name)
+                drilldown_combined = pd.concat([drilldown_combined, df_copy], ignore_index=True)
         if not drilldown_combined.empty:
             drilldown_combined.to_excel(writer, sheet_name="Drill-down Data", index=False)
 
-        # -------------------------------
-        # 3️⃣ Summary by project
-        # -------------------------------
-        summary_cols = ['project', 'Total']
+        # 3c. Project summary sheet
         summary_df = pd.DataFrame()
         for cat_name, bar_df in bar_data_dict.items():
             if 'Mapped' in bar_df.columns and 'Total' in bar_df.columns:
@@ -1553,10 +1538,8 @@ def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
                 if summary_df.empty:
                     summary_df = temp
                 else:
-                    summary_df = pd.merge(summary_df, temp, how='outer', left_on='Project', right_on='Project')
-
+                    summary_df = pd.merge(summary_df, temp, how='outer', on='Project')
         if not summary_df.empty:
-            # Compute overall total per project
             total_cols = [c for c in summary_df.columns if "_Total" in c]
             summary_df['Grand_Total'] = summary_df[total_cols].sum(axis=1)
             summary_df.to_excel(writer, sheet_name="Project Summary", index=False)
@@ -1565,3 +1548,14 @@ def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
         processed_data = output.getvalue()
 
     return processed_data
+
+# -------------------------------
+# 4️⃣ Download button
+# -------------------------------
+excel_bytes = generate_excel_export(bar_data_dict, drilldown_dict)
+st.download_button(
+    label="📥 Download All Data to Excel",
+    data=excel_bytes,
+    file_name=f"Planning_and_BarCharts_{date_range_str}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
