@@ -243,7 +243,20 @@ def multi_select_filter(col, label, df):
 
     return selected, df[df[col].astype(str).isin(selected)]
 
+def preprocess_df(df):
+    import pandas as pd
 
+    # Ensure the 'datetouse' column exists
+    if 'datetouse' in df.columns:
+        df['datetouse_dt'] = pd.to_datetime(df['datetouse'], errors='coerce').dt.normalize()
+        df['datetouse_display'] = df['datetouse_dt'].dt.strftime("%d/%m/%Y")
+    else:
+        df['datetouse_dt'] = pd.NaT
+        df['datetouse_display'] = "Unplanned"
+
+    # Add other preprocessing here if needed
+    # e.g., stripping strings, renaming columns, converting numbers
+    return df
 
 def to_excel(project_df, team_df):
     output = BytesIO()
