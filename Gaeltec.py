@@ -1510,29 +1510,35 @@ with center_col:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
+# Ensure the dictionaries exist
+if 'bar_data_dict' not in locals():
+    bar_data_dict = {}
+if 'drilldown_dict' not in locals():
+    drilldown_dict = {}
+
 def generate_excel_export(bar_data_dict, drilldown_dict):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # 3a. Bar chart sheets
+        # --- 1️⃣ Bar chart sheets ---
         for cat_name, bar_df in bar_data_dict.items():
-            if not bar_df.empty:
-                sheet_name = cat_name[:31]
+            if isinstance(bar_df, pd.DataFrame) and not bar_df.empty:
+                sheet_name = cat_name[:31]  # Excel sheet name limit
                 bar_df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # 3b. Drill-down data sheet
+        # --- 2️⃣ Drill-down combined sheet ---
         drilldown_combined = pd.DataFrame()
         for cat_name, display_df in drilldown_dict.items():
-            if not display_df.empty:
+            if isinstance(display_df, pd.DataFrame) and not display_df.empty:
                 df_copy = display_df.copy()
                 df_copy.insert(0, "Category", cat_name)
                 drilldown_combined = pd.concat([drilldown_combined, df_copy], ignore_index=True)
         if not drilldown_combined.empty:
             drilldown_combined.to_excel(writer, sheet_name="Drill-down Data", index=False)
 
-        # 3c. Project summary sheet
+        # --- 3️⃣ Project summary sheet ---
         summary_df = pd.DataFrame()
         for cat_name, bar_df in bar_data_dict.items():
-            if 'Mapped' in bar_df.columns and 'Total' in bar_df.columns:
+            if isinstance(bar_df, pd.DataFrame) and 'Mapped' in bar_df.columns and 'Total' in bar_df.columns:
                 temp = bar_df.groupby('Mapped')['Total'].sum().reset_index()
                 temp.rename(columns={'Mapped': 'Project', 'Total': f"{cat_name}_Total"}, inplace=True)
                 if summary_df.empty:
@@ -1545,9 +1551,7 @@ def generate_excel_export(bar_data_dict, drilldown_dict):
             summary_df.to_excel(writer, sheet_name="Project Summary", index=False)
 
         writer.save()
-        processed_data = output.getvalue()
-
-    return processed_data
+        return output.getvalue()
 
 # -------------------------------
 # 4️⃣ Download button
