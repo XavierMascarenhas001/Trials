@@ -1169,6 +1169,11 @@ def sanitize_sheet_name(name: str) -> str:
 
 erect_h_items = [k for k in CV7_erect.keys() if "'H' HV/EHV Pole" in k]
 recover_h_items = [k for k in CV7_recover.keys() if "'A' / 'H' pole" in k]
+# -------------------
+# DATA COLLECTION DICTS
+# -------------------
+bar_data_dict = {}       # Will hold bar chart data per category
+drilldown_dict = {}      # Will hold drill-down tables per category
 
 for cat_name, keys, y_label in categories:
 
@@ -1221,6 +1226,11 @@ for cat_name, keys, y_label in categories:
         y_axis_label = "Length (Miles)"
 
     grand_total = bar_data['Total'].sum()
+    # Add to bar data dict
+    bar_data_dict[cat_name] = bar_data
+
+    # Add to drill-down dict
+    drilldown_dict[cat_name] = sub_df.copy()
     st.subheader(f"🔹 {cat_name} — Total: {grand_total:,.2f}")
 
     # Plot bar chart
@@ -1517,39 +1527,33 @@ def sanitize_sheet_name(name: str) -> str:
     name = re.sub(r'[^\x00-\x7F]', '_', name)
     return name[:31]
 
+# -------------------
+# EXCEL EXPORT FUNCTION
+# -------------------
 def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
-    """
-    Generates an Excel file in memory with:
-    - One sheet per bar chart (summary)
-    - One sheet per drill-down table
-    - One sheet with all combined filtered data
-    - One sheet summarizing totals by project
-    """
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
 
-        # --- 1️⃣ Bar chart sheets ---
+        # Bar chart sheets
         for cat_name, df in bar_data_dict.items():
             if df.empty:
                 continue
             sheet_name = sanitize_sheet_name(cat_name)
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # --- 2️⃣ Drill-down sheets ---
+        # Drill-down sheets
         for cat_name, df in drilldown_dict.items():
             if df.empty:
                 continue
             sheet_name = sanitize_sheet_name(f"{cat_name}_details")
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # --- 3️⃣ Combined sheet ---
+        # Combined filtered data
         if not filtered_df.empty:
-            combined_sheet_name = "Combined_Data"
-            filtered_df.to_excel(writer, sheet_name=combined_sheet_name, index=False)
+            filtered_df.to_excel(writer, sheet_name="Combined_Data", index=False)
 
-        # --- 4️⃣ Project summary sheet ---
+        # Project summary (sum numeric columns)
         if 'project' in filtered_df.columns:
-            # Sum numeric columns per project
             numeric_cols = filtered_df.select_dtypes(include='number').columns.tolist()
             if numeric_cols:
                 project_summary = filtered_df.groupby('project', as_index=False)[numeric_cols].sum()
@@ -1560,16 +1564,9 @@ def generate_excel_export(bar_data_dict, drilldown_dict, filtered_df):
 
     return excel_data
 
-# ------------------------------
-# Example usage in Streamlit
-# ------------------------------
-
-# Prepare dictionaries for bar chart data and drill-downs
-# Example: { 'CV7_erect': bar_data_df, ... }
-bar_data_dict = {}       # Fill with your bar_data DataFrames
-drilldown_dict = {}      # Fill with your drilldown DataFrames
-
-# Only show button if we have data
+# -------------------
+# DOWNLOAD BUTTON
+# -------------------
 if bar_data_dict or drilldown_dict:
     excel_bytes = generate_excel_export(bar_data_dict, drilldown_dict, filtered_df)
 
