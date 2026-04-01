@@ -520,27 +520,22 @@ def generate_excel_safe(export_df, poles_df=None):
     """
     buffer = BytesIO()
 
-    # If main DataFrame is empty, add a dummy row
-    if export_df is None or export_df.empty:
-        export_df = pd.DataFrame({"Info": ["No data available"]})
-
-    # If poles_df exists but is empty, add a dummy row
-    if poles_df is not None and poles_df.empty:
-        poles_df = pd.DataFrame({"Info": ["No poles data"]})
+    def safe_to_excel(writer, df, sheet_name):
+        """Write DataFrame to Excel safely, adding a dummy row if empty"""
+        if df is None or df.empty:
+            df = pd.DataFrame({"Info": ["No data available"]})
+        df.to_excel(writer, sheet_name=sheet_name[:31], index=False, startrow=1, na_rep="")
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        # Always write main sheet first
-        export_df.to_excel(writer, sheet_name="HighLevel", index=False)
+        # Main sheet
+        safe_to_excel(writer, export_df, "HighLevel")
 
-        # Only write poles sheet if poles_df exists
+        # Optional poles sheet
         if poles_df is not None:
-            # Ensure sheet has at least one row
-            if poles_df.empty:
-                poles_df = pd.DataFrame({"Info": ["No poles data"]})
-            poles_df.to_excel(writer, sheet_name="Poles", index=False)
+            safe_to_excel(writer, poles_df, "Poles")
 
     buffer.seek(0)
-    return buffer.getvalue()
+    return buffer
     
 # --- MAPPINGS ---
 
