@@ -1341,10 +1341,23 @@ cv8_summary = cv8_df.groupby('CV8_type').agg(
 plot_bar_chart(cv8_summary, "CV8 Unique Poles", x_col="CV8_type", y_col="Total", y_label="Unique Poles")
 
 # -------------------------------
+# DATE NORMALIZATION FOR CV8
+# -------------------------------
+date_cols = ['datetouse', 'plan1', 'done']
+
+for col in date_cols:
+    if col in cv8_df.columns:
+        cv8_df[col + '_display'] = pd.to_datetime(
+            cv8_df[col], errors='coerce'
+        ).dt.strftime("%d/%m/%Y").fillna("Unplanned")
+    else:
+        cv8_df[col + '_display'] = "Unplanned"
+
+# -------------------------------
 # CV8 DRILL-DOWN TABLE
 # -------------------------------
 with st.expander("🔍 CV8 Drill-down: Unique Poles Details", expanded=False):
-    display_cols = ['project', 'segmentcode', 'segmentdesc', 'pole', 'item', 'comment', 'plan1', 'done']
+    display_cols = ['project', 'segmentcode', 'segmentdesc', 'pole', 'item', 'comment', 'plan1_display', 'done_display']
     display_cols = [c for c in display_cols if c in cv8_df.columns]
     display_df = cv8_df[display_cols].drop_duplicates(subset=['pole'])
     st.dataframe(display_df, use_container_width=True)
