@@ -1156,8 +1156,8 @@ for cat_name, keys, y_label in categories:
         selected_rows = sub_df[sub_df['mapped'] == selected_mapping].copy()
         selected_rows.columns = selected_rows.columns.str.strip().str.lower()
         display_columns = [
-            'shire', 'project', 'segmentdesc', 'item', 'comment',
-            'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done'
+            'shire', 'project', 'segmentdesc', 'comment',
+            'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done', 'item'
         ]
         display_columns = [c for c in display_columns if c in selected_rows.columns]
         display_df = selected_rows[display_columns].copy()
