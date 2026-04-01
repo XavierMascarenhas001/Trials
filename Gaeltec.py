@@ -1569,7 +1569,6 @@ def generate_excel_export(display_columns, bar_data_dict, drilldown_dict, cv8_df
         for project in projects:
             row = {'project': project}
             total_sum = 0
-            original_sum = 0
             for sheet_name, df in all_sheets.items():
                 if 'project' in df.columns and 'qsub' in df.columns:
                     val = df[df['project'] == project]['qsub'].sum()
