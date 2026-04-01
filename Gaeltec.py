@@ -1619,7 +1619,7 @@ def generate_excel_export(display_columns, drilldown_dict, cv8_df):
             combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
 
     return output.getvalue()
-✅ Updated button (IMPORTANT)
+
 if drilldown_dict or not cv8_df.empty:
 
     excel_bytes = generate_excel_export(
