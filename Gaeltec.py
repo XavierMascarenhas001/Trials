@@ -1172,9 +1172,7 @@ for cat_name, keys, y_label in categories:
         # Display table
         st.write("🔹 Information Resumed:")
         st.dataframe(display_df, use_container_width=True)
-        if not selected_rows.empty:
-            st.dataframe(selected_rows, use_container_width=True)
-            st.write(f"**Total records:** {len(selected_rows)}")
+
 
 
 
