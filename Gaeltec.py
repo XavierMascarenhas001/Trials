@@ -1241,11 +1241,13 @@ for cat_name, keys, y_label in categories:
             Total=('pole', 'count'),
             Variation=('qcvi_clean', 'sum')
         ).reset_index()
+        drilldown_dict[cat_name] = sub_df_unique_poles.copy()  # match bar chart
     else:
         bar_data = sub_df.groupby('mapped').agg(
             Total=('adj_value', 'sum'),
             Variation=('qcvi_clean', 'sum')
         ).reset_index()
+        drilldown_dict[cat_name] = sub_df.copy()
 
     bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
     bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
@@ -1345,16 +1347,13 @@ for cat_name, keys, y_label in categories:
 # MAIN CV8 FUNCTION
 # --------------------------------------------------
 def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
-
-    # -------------------------------
     # SAFETY CHECK
-    # -------------------------------
     if filtered_df is None or filtered_df.empty:
         st.error("Data not loaded into filtered_df")
         st.stop()
 
     # -------------------------------
-    # PLOT FUNCTION
+    # BAR CHART FUNCTION
     # -------------------------------
     def plot_bar_chart(df, category_name, x_col, y_col="Total", y_label="Quantity"):
         if df.empty:
@@ -1362,7 +1361,6 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
             return
 
         df = df.sort_values(by=y_col, ascending=False)
-
         fig = go.Figure()
         fig.add_bar(
             x=df[x_col],
@@ -1371,7 +1369,6 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
             textposition='outside',
             marker_color="#4C78A8"
         )
-
         fig.update_layout(
             title=f"{category_name} Overview",
             xaxis_title=x_col,
@@ -1381,7 +1378,6 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
             yaxis=dict(gridcolor='rgba(255,255,255,0.3)'),
             xaxis_tickangle=-30
         )
-
         st.plotly_chart(fig, use_container_width=True)
 
     # -------------------------------
@@ -1392,33 +1388,25 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
     ])
     cv7_poles = filtered_df.loc[filtered_df['item'].isin(cv7_items), 'pole'].dropna().unique()
 
-    # -------------------------------
-    # FILTER CV8 POLES (ONLY ITEMS IN CV8 MAPPING)
-    # -------------------------------
+    # FILTER CV8 POLES
     CV8_items = set(CV8.keys())
     cv8_df = filtered_df.loc[
-        (~filtered_df['pole'].isin(cv7_poles)) &      # exclude CV7 poles
-        (filtered_df['pole'].notna()) &              # ignore NaN poles
-        (filtered_df['item'].isin(CV8_items))        # only include CV8 items
+        (~filtered_df['pole'].isin(cv7_poles)) &
+        (filtered_df['pole'].notna()) &
+        (filtered_df['item'].isin(CV8_items))
     ].copy()
 
-    # -------------------------------
-    # ASSIGN CV8 TYPE
-    # -------------------------------
+    # TYPE ASSIGNMENT
     cv8_df['CV8_type'] = np.where(
         cv8_df['project'].astype(str).str.upper().str.contains('LV', na=False),
         'CV8_LV',
         'CV8_HV'
     )
 
-    # -------------------------------
     # AGGREGATE SUMMARY
-    # -------------------------------
-    cv8_summary = cv8_df.groupby('CV8_type', as_index=False)['pole'].nunique().rename(columns={'pole': 'Total'})
+    cv8_summary = cv8_df.groupby('CV8_type', as_index=False)['pole'].nunique().rename(columns={'pole':'Total'})
 
-    # -------------------------------
     # PLOT BAR CHART
-    # -------------------------------
     plot_bar_chart(cv8_summary, "CV8 Unique Poles", x_col="CV8_type", y_col="Total", y_label="Unique Poles")
 
     # -------------------------------
@@ -1437,7 +1425,6 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
         formatted_dates.columns = [col + '_display' for col in existing_cols]
         cv8_df = pd.concat([cv8_df, formatted_dates], axis=1)
 
-    # Fill missing date columns
     for col in set(date_cols) - set(existing_cols):
         cv8_df[col + '_display'] = "Missing"
 
@@ -1457,132 +1444,71 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
         st.write(f"**Total unique poles displayed:** {display_df['pole'].nunique()}")
 
     return cv8_df, cv8_summary
+
 # --------------------------------------------------
-# CALL FUNCTION
+# CALL CV8 FUNCTION
 # --------------------------------------------------
 cv8_df, cv8_summary = run_cv8_analysis(
     filtered_df,
     CV7_erect,
     CV7_erect_lv,
     CV7_recover,
-    CV8  # pass your CV8 dictionary here
+    CV8
 )
 
-
-
-
 # --------------------------------------------------
-# PAGE / LAYOUT (WIDER DISPLAY)
+# PAGE LAYOUT
 # --------------------------------------------------
 st.set_page_config(layout="wide")
-
-# Optional: make content visually wider
 st.markdown("""
     <style>
-        .block-container {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
-            max-width: 100%;
-        }
-        /* Scrollable table-style display */
+        .block-container { padding-top:1rem; padding-bottom:1rem; max-width:100%; }
         .scroll-box {
-            max-height: 400px;
-            overflow-y: auto;
-            overflow-x: auto;
-            padding: 12px;
-            border: 1px solid #444;
-            background-color: #111;
-            font-family: monospace;
-            font-size: 14px;
-            white-space: nowrap;
-            color: #fff;
+            max-height:400px; overflow-y:auto; overflow-x:auto;
+            padding:12px; border:1px solid #444; background-color:#111;
+            font-family:monospace; font-size:14px; white-space:nowrap; color:#fff;
         }
-        .scroll-box span {
-            display: inline-block;
-            min-width: 120px; /* column width */
-            padding-right: 20px;
-        }
+        .scroll-box span { display:inline-block; min-width:120px; padding-right:20px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --------------------------------------------------
-# DISPLAY SECTION
-# --------------------------------------------------
 st.markdown("<h2 style='text-align:center; color:white;'>Projects & Circuits Overview</h2>", unsafe_allow_html=True)
-    # ✅ REQUIRED COLUMNS (UPDATED)
+
 required_cols = ['shire', 'datetouse_dt', 'project', 'segmentcode', 'segmentdesc']
 existing_cols = [c for c in required_cols if c in filtered_df.columns]
 
 if 'project' in existing_cols:
     projects = filtered_df['project'].dropna().unique()
 
-    if len(projects) == 0:
-        st.info("No projects found for the selected filters.")
-    else:
-        for proj in sorted(projects):
-            proj_df = filtered_df[filtered_df['project'] == proj]
+    for proj in sorted(projects):
+        proj_df = filtered_df[filtered_df['project'] == proj]
+        cols_to_use = [c for c in required_cols if c in proj_df.columns]
+        segments = proj_df[cols_to_use].dropna(subset=['segmentcode']).drop_duplicates()
 
-            # ✅ columns for display
-            cols_to_use = [c for c in required_cols if c in proj_df.columns]
+        with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
+            display_lines = []
+            for _, row in segments.iterrows():
+                district = str(row.get("shire", ""))
+                dt = row.get("datetouse_dt", None)
+                date = dt.strftime("%d/%m/%Y") if pd.notna(dt) else "Missing"
+                circuit = str(row.get("segmentcode", ""))
+                segment = str(row.get("segmentdesc", ""))
+                display_lines.append(f"{district} | {date} | {circuit} | {segment}")
 
-            segments = (
-                proj_df[cols_to_use]
-                .dropna(subset=['segmentcode'])
-                .drop_duplicates()
+            st.markdown(
+                "<div class='scroll-box'>" + "<br>".join(display_lines) + "</div>",
+                unsafe_allow_html=True
             )
-
-            with st.expander(f"Project: {proj} ({len(segments)} circuits)"):
-                if not segments.empty:
-                    display_lines = []
-
-                    for _, row in segments.iterrows():
-                        district = str(row.get("shire", ""))
-                        dt = row.get("datetouse_dt", None)
-                        if pd.notna(dt):
-                            date = dt.strftime("%d/%m/%Y")  # Day/Month/Year
-                        else:
-                            date = "Missing"
-                        circuit = str(row.get("segmentcode", ""))
-                        segment = str(row.get("segmentdesc", ""))
-
-                        line = f"{district} | {date} | {circuit} | {segment}"
-                        display_lines.append(line)
-
-                    # ✅ WIDER + SCROLLABLE DISPLAY BOX
-                    st.markdown(
-                        """
-                        <div style='
-                            width:100%;
-                            max-height:400px;
-                            overflow-x:auto;
-                            overflow-y:auto;
-                            padding:12px;
-                            border:1px solid #444;
-                            background-color:#111;
-                            font-family:monospace;
-                            font-size:14px;
-                            white-space:nowrap;
-                        '>
-                        """ + "<br>".join(display_lines) + "</div>",
-                        unsafe_allow_html=True
-                    )
-                else:
-                    st.write("No circuit data for this project.")
-
 else:
     st.info("Project column not found in the data.")
 
-# --------------------------------------------------
-# GLOBAL EXCEL DOWNLOAD BUTTON
-# --------------------------------------------------
-st.markdown("---")
-
-# Assuming center_col is defined from your previous layout
+# -------------------------------
+# HIGH LEVEL PLANNING EXPORT BUTTON
+# -------------------------------
 col1, center_col, col3 = st.columns([1, 3, 1])
 with center_col:
     if 'filtered_df' in locals() and not filtered_df.empty:
-
-        # ✅ DEFINE EXPORT COLUMNS (MATCH DISPLAY)
+        # Columns for the high level planning
         export_columns = [
             "shire",
             "datetouse_display",
@@ -1590,42 +1516,39 @@ with center_col:
             "segmentcode",
             "segmentdesc"
         ]
-
         export_df = filtered_df[[c for c in export_columns if c in filtered_df.columns]].copy()
 
-        excel_file = generate_excel_styled_multilevel(
+        excel_file_high_level = generate_excel_styled_multilevel(
             export_df,
             poles_df if 'poles_df' in locals() else None
         )
 
         st.download_button(
-            label="📥 High level planning & Poles Excel",
-            data=excel_file,
+            label="📥 High Level Planning & Poles Excel",
+            data=excel_file_high_level,
             file_name=f"High_level_planning_{date_range_str}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
+
+# --------------------------------------------------
+# EXCEL EXPORT
+# --------------------------------------------------
 def sanitize_sheet_name(name: str) -> str:
-    """Clean sheet names for Excel (max 31 chars, no invalid chars)."""
     name = str(name)
     name = re.sub(r'[:\\/*?\[\]\n\r]', '_', name)
     name = re.sub(r'[^\x00-\x7F]', '_', name)
     return name[:31]
 
-# -------------------
-# EXCEL EXPORT FUNCTION
-# -------------------
 display_columns = [
     'shire', 'project', 'segmentcode', 'segmentdesc', 'comment',
     'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done', 'item'
 ]
-def generate_excel_export(display_columns, drilldown_dict, cv8_df):
 
+def generate_excel_export(display_columns, drilldown_dict, cv8_df, cv31_summary=None):
     output = io.BytesIO()
 
-    # -----------------------------
     # Helper: enforce display columns
-    # -----------------------------
     def prepare_df(df):
         df = df.copy()
         for col in display_columns:
@@ -1633,12 +1556,9 @@ def generate_excel_export(display_columns, drilldown_dict, cv8_df):
                 df[col] = ""
         return df[display_columns].fillna("")
 
-    # -----------------------------
-    # Combine all datasets
-    # -----------------------------
     all_data = {}
 
-    # CV7 + others
+    # CV7 + CV31
     for name, df in drilldown_dict.items():
         if not df.empty:
             all_data[name] = prepare_df(df)
@@ -1653,31 +1573,35 @@ def generate_excel_export(display_columns, drilldown_dict, cv8_df):
     summary_rows = []
 
     if all_data:
-        all_projects = pd.concat(
-            [df[['project']] for df in all_data.values()],
-            ignore_index=True
-        )['project'].dropna().unique()
-
+        all_projects = pd.concat([df[['project']] for df in all_data.values()], ignore_index=True)['project'].dropna().unique()
         for project in all_projects:
             row = {"project": project}
             total_qsub = 0
             total_qvci = 0
 
             for name, df in all_data.items():
-
                 proj_df = df[df['project'] == project]
 
-                # Ensure numeric
-                qsub = pd.to_numeric(proj_df.get('qsub', 0), errors='coerce').fillna(0).sum()
-                qvci = pd.to_numeric(proj_df.get('qvci', 0), errors='coerce').fillna(0).sum()
-
-                row[name] = qsub
-                total_qsub += qsub
-                total_qvci += qvci
+                if name == "CV31":
+                    # Use unique pole count for CV31
+                    val = proj_df['pole'].nunique()
+                    row[name] = val
+                    total_qsub += val
+                elif name == "CV8":
+                    # Use unique pole count for CV8
+                    val = proj_df['pole'].nunique()
+                    row[name] = val
+                    total_qsub += val
+                else:
+                    # Regular numeric sum
+                    qsub = pd.to_numeric(proj_df.get('qsub', 0), errors='coerce').fillna(0).sum()
+                    qvci = pd.to_numeric(proj_df.get('qvci', 0), errors='coerce').fillna(0).sum()
+                    row[name] = qsub
+                    total_qsub += qsub
+                    total_qvci += qvci
 
             row["Total"] = total_qsub
             row["Original"] = total_qvci
-
             summary_rows.append(row)
 
         summary_df = pd.DataFrame(summary_rows)
@@ -1688,33 +1612,22 @@ def generate_excel_export(display_columns, drilldown_dict, cv8_df):
     # Write Excel
     # -----------------------------
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-
-        # 1️⃣ Project Summary FIRST
         if not summary_df.empty:
             summary_df.to_excel(writer, sheet_name="Project_Summary", index=False)
-
-        # 2️⃣ Individual sheets
         for name, df in all_data.items():
             sheet_name = sanitize_sheet_name(name)
             df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-        # 3️⃣ Combined data LAST
         if all_data:
             combined_df = pd.concat(all_data.values(), ignore_index=True)
             combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
 
     return output.getvalue()
+
 # -------------------------------
 # DOWNLOAD BUTTON
 # -------------------------------
-if drilldown_dict or not cv8_df.empty:
-
-    excel_bytes = generate_excel_export(
-        display_columns,
-        drilldown_dict,
-        cv8_df
-    )
-
+if drilldown_dict or (cv8_df is not None and not cv8_df.empty):
+    excel_bytes = generate_excel_export(display_columns, drilldown_dict, cv8_df)
     st.download_button(
         label="📥 Export All Data to Excel",
         data=excel_bytes,
