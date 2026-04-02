@@ -762,6 +762,7 @@ CV31 = {
 
 CV8 = {
     "Tighten existing stay.": "CV8",
+    "Plumb single pole.": "CV8",
     "Erect/Replace stay above ground only.": "CV8",
     "Erect/Replace stay complete including block or driven type anchor": "CV8",
     "Erect/Replace stay complete including rock type anchor": "CV8",
@@ -797,30 +798,27 @@ CV8 = {
     "Convert 3.ph 11kV Intermediate pole into Section Pole.": "CV8",
     "Change 11kV Insulators to avoid contamination from old conductor": "CV8",
     "Change 33kV Insulators to avoid contamination from old conductor": "CV8",
-    "Replace 11kV/33kV insulator pin and insulator, including unbinding and binding in" "CV8",
-    "Replace 11kV/33kV insulator binder" "CV8",
-    "Replace tension insulator, 11kV" "CV8",
-    "Replace tension insulator, 33kV" "CV8",
-    "Replace 11kV/33kV dead end termination" "CV8",
-    "Additional cost for erection of pilot pin and insulator or pilot post insulator (11kV or 33kV)" "CV8",
-    "Replace insulated conductor HV/LV earth above ground to first rod" "CV8",
-    "Install Copper Covered Green / Yellow HV Earth or Black LV Earth to foot of pole" "CV8",
-    "Install EHV/ HV Earth Electrode including excavate & reinstate (up to 8mtrs)" "CV8",
-    "Install LV Earth Electrode including excavate & reinstate (up to 28mtrs)" "CV8",
-    "Additional extra over for additional earthing excavated, laid & backfilled" "CV8",
-    "Install Earth Electrode within cable trench" "CV8",
-    "Erect 11kV Cable Termination ( incorporating surge arrestors )" "CV8",
-    "Replace / Fit safety or warning sign, number plates or name plate" "CV8",
-    "Barbed Wire Wrap ACD (or Enhanced) single pole or stay - Replace/Repair" "CV8",
-    "Erect 33kV Cable Termination ( incorporating surge arrestors )" "CV8",
-    "Steelwork bonding repair / fit" "CV8",
-    "Replace LV/HV/Earth guard missing / damaged" "CV8",
-    "Erect 1.ph LV cable pole termination" "CV8",
-    "Erect 3.ph LV cable pole termination" "CV8",
-    "Remove 11kV/33kV Cable termination" "CV8",
-    "Remove LV cable termination" "CV8"
+    "Replace 11kV/33kV insulator pin and insulator, including unbinding and binding in": "CV8",
+    "Replace 11kV/33kV insulator binder": "CV8",
+    "Replace tension insulator, 11kV": "CV8",
+    "Replace tension insulator, 33kV": "CV8",
+    "Replace 11kV/33kV dead end termination": "CV8",
+    "Additional cost for erection of pilot pin and insulator or pilot post insulator (11kV or 33kV)": "CV8",
+    "Replace insulated conductor HV/LV earth above ground to first rod": "CV8",
+    "Install Copper Covered Green / Yellow HV Earth or Black LV Earth to foot of pole": "CV8",
+    "Install EHV/ HV Earth Electrode including excavate & reinstate (up to 8mtrs)": "CV8",
+    "Install LV Earth Electrode including excavate & reinstate (up to 28mtrs)": "CV8",
+    "Additional extra over for additional earthing excavated, laid & backfilled": "CV8",
+    "Install Earth Electrode within cable trench": "CV8",
+    "Erect 11kV Cable Termination ( incorporating surge arrestors )": "CV8",
+    "Erect 33kV Cable Termination ( incorporating surge arrestors )": "CV8",
+    "Steelwork bonding repair / fit": "CV8",
+    "Replace LV/HV/Earth guard missing / damaged": "CV8",
+    "Erect 1.ph LV cable pole termination": "CV8",
+    "Erect 3.ph LV cable pole termination": "CV8",
+    "Remove 11kV/33kV Cable termination": "CV8",
+    "Remove LV cable termination": "CV8",
 }
-
 
 summary_items = [
     "Erect Single HV/EHV Pole, up to and including 12 metre pole.",
@@ -1182,6 +1180,7 @@ convert_to_miles = st.checkbox("Convert Equipment/Conductor Length to Miles")
 
 categories = [
     ("CV7_erect", CV7_erect, "Quantity"),
+    ("CV7_erect_lv", CV7_erect_lv, "Quantity"),
     ("CV7_recover", CV7_recover, "Quantity"),
     ("CV7 Tx", CV7_Tx, "Quantity"),
     ("transformer", transformer, "Quantity"),
@@ -1222,14 +1221,13 @@ for cat_name, keys, y_label in categories:
     sub_df = filtered_df[mask]
 
     # --- Normalize dates in sub_df ---
-    # --- Normalize dates ---
     for col in ['datetouse', 'plan1', 'done']:
         if col in sub_df.columns:
             sub_df[col] = pd.to_datetime(sub_df[col], errors='coerce').dt.strftime("%d/%m/%Y")
             sub_df[col] = sub_df[col].fillna("Missing")
 
-    # Clean numeric columns
-    sub_df['qvci_clean'] = pd.to_numeric(sub_df['qvci'] if 'qvci' in sub_df.columns else pd.Series(0, index=sub_df.index), errors='coerce').fillna(0)
+    # --- Clean numeric columns ---
+    sub_df['qcvi_clean'] = pd.to_numeric(sub_df['qcvi'] if 'qcvi' in sub_df.columns else pd.Series(0, index=sub_df.index), errors='coerce').fillna(0)
     sub_df['qsub_clean'] = pd.to_numeric(sub_df['qsub'] if 'qsub' in sub_df.columns else pd.Series(0, index=sub_df.index), errors='coerce').fillna(0)
     sub_df["multiplier"] = 1
     sub_df.loc[sub_df["item"].isin(erect_h_items), "multiplier"] = 2
@@ -1238,19 +1236,16 @@ for cat_name, keys, y_label in categories:
 
     # --- Aggregate ---
     if cat_name == "CV31":
-        # Deduplicate poles first
         sub_df_unique_poles = sub_df.drop_duplicates(subset=['pole'])
         bar_data = sub_df_unique_poles.groupby('mapped').agg(
             Total=('pole', 'count'),
-            Variation=('qvci_clean', 'sum')
+            Variation=('qcvi_clean', 'sum')
         ).reset_index()
-
     else:
         bar_data = sub_df.groupby('mapped').agg(
             Total=('adj_value', 'sum'),
-            Variation=('qvci_clean', 'sum')
+            Variation=('qcvi_clean', 'sum')
         ).reset_index()
-        
 
     bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
     bar_data['PositiveVar'] = bar_data['Variation'].clip(lower=0)
@@ -1263,6 +1258,7 @@ for cat_name, keys, y_label in categories:
         y_axis_label = "Length (Miles)"
 
     grand_total = bar_data['Total'].sum()
+
     # Add to bar data dict
     bar_data_dict[cat_name] = bar_data
 
@@ -1270,30 +1266,36 @@ for cat_name, keys, y_label in categories:
     drilldown_dict[cat_name] = sub_df.copy()
     st.subheader(f"🔹 {cat_name} — Total: {grand_total:,.2f}")
 
-    # Plot bar chart
-    fig = go.Figure()
-    fig.add_bar(
-        x=bar_data['Mapped'], y=bar_data['Total'],
-        name="Quantity", marker_color="#4C78A8", text=bar_data['Total'],
-        texttemplate='%{y:,.1f}', textposition='outside'
-    )
-    fig.add_bar(
-        x=bar_data['Mapped'], y=bar_data['PositiveVar'],
-        name="Positive Variation", marker_color="green"
-    )
-    fig.add_bar(
-        x=bar_data['Mapped'], y=bar_data['NegativeVar'],
-        name="Negative Variation", marker_color="red"
-    )
-    fig.update_layout(
-        barmode='relative', title=f"{cat_name} Overview",
-        xaxis_title="Mapping", yaxis_title=y_axis_label,
-        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-        yaxis=dict(gridcolor='rgba(255,255,255,0.3)')
-    )
-    st.plotly_chart(fig, use_container_width=True, height=500)
+    # --- Plot bar chart only if there is data ---
+    if grand_total > 0:
+        fig = go.Figure()
+        fig.add_bar(
+            x=bar_data['Mapped'], y=bar_data['Total'],
+            name="Quantity", marker_color="#4C78A8", text=bar_data['Total'],
+            texttemplate='%{y:,.1f}', textposition='outside'
+        )
+        fig.add_bar(
+            x=bar_data['Mapped'], y=bar_data['PositiveVar'],
+            name="Positive Variation", marker_color="green"
+        )
+        fig.add_bar(
+            x=bar_data['Mapped'], y=bar_data['NegativeVar'],
+            name="Negative Variation", marker_color="red"
+        )
+        fig.update_layout(
+            barmode='relative',
+            title=f"{cat_name} Overview",
+            xaxis_title="Mapping",
+            yaxis_title=y_axis_label,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            yaxis=dict(gridcolor='rgba(255,255,255,0.3)')
+        )
+        st.plotly_chart(fig, use_container_width=True, height=500)
+    else:
+        st.info(f"No data available for {cat_name}, chart not displayed.")
 
-    # Collapsible drill-down
+    # --- Collapsible drill-down ---
     with st.expander("🔍 Click to explore more information", expanded=False):
         st.subheader("Select Mapping to Drill-down:")
         cols = st.columns(3)
@@ -1305,121 +1307,166 @@ for cat_name, keys, y_label in categories:
                     st.session_state[f"selected_{cat_name}"] = mapping_value
                     st.rerun()
 
-    selected_mapping = st.session_state.get(f"selected_{cat_name}")
-    if selected_mapping:
-        st.subheader(f"Details for: **{selected_mapping}**")
-        if st.button("❌ Clear Selection", key=f"clear_{cat_name}"):
-            del st.session_state[f"selected_{cat_name}"]
-            st.rerun()
+        selected_mapping = st.session_state.get(f"selected_{cat_name}")
+        if selected_mapping:
+            st.subheader(f"Details for: **{selected_mapping}**")
+            if st.button("❌ Clear Selection", key=f"clear_{cat_name}"):
+                del st.session_state[f"selected_{cat_name}"]
+                st.rerun()
 
-        selected_rows = sub_df[sub_df['mapped'] == selected_mapping].copy()
-        selected_rows.columns = selected_rows.columns.str.strip().str.lower()
-        display_columns = [
-            'shire', 'project', 'segmentcode', 'segmentdesc', 'comment',
-            'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done', 'item'
-        ]
-        display_columns = [c for c in display_columns if c in selected_rows.columns]
-        display_df = selected_rows[display_columns].copy()
-        display_df.rename(columns={
-            'shire': 'District',
-            'segmentcode':'Circuit',
-            'segmentdesc': 'Segment',
-            'qty': 'Quantity',
-            'qsub': 'Quantity Used'
-        }, inplace=True)
-        st.write(f"**Total records:** {len(display_df)}")
+            selected_rows = sub_df[sub_df['mapped'] == selected_mapping].copy()
+            selected_rows.columns = selected_rows.columns.str.strip().str.lower()
+            display_columns = [
+                'shire', 'project', 'segmentcode', 'segmentdesc', 'comment',
+                'pole', 'qty', 'qcvi', 'qsub', 'plan1', 'done', 'item'
+            ]
+            display_columns = [c for c in display_columns if c in selected_rows.columns]
+            display_df = selected_rows[display_columns].copy()
+            display_df.rename(columns={
+                'shire': 'District',
+                'segmentcode':'Circuit',
+                'segmentdesc': 'Segment',
+                'qty': 'Quantity',
+                'qcvi':'Variation',
+                'qsub': 'Quantity Used'
+            }, inplace=True)
+            st.write(f"**Total records:** {len(display_df)}")
 
-        # Display table
-        st.write("🔹 Information Resumed:")
-        st.dataframe(display_df, use_container_width=True)
+            # Display table
+            st.write("🔹 Information Resumed:")
+            st.dataframe(display_df, use_container_width=True)
 
 
 # --------------------------------------------------
 # CV8 CALCULATION (EXCLUDE CV7 POLES)
 # --------------------------------------------------
 
-# --- Safety check ---
-if 'filtered_df' not in locals():
-    st.error("Data not loaded into filtered_df")
-    st.stop()
+# --------------------------------------------------
+# MAIN CV8 FUNCTION
+# --------------------------------------------------
+def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
 
-# -------------------------------
-# FUNCTION TO PLOT BAR CHARTS
-# -------------------------------
-def plot_bar_chart(df, category_name, x_col, y_col="Total", y_label="Quantity"):
-    if df.empty:
-        st.warning(f"No data for {category_name}")
-        return
+    # -------------------------------
+    # SAFETY CHECK
+    # -------------------------------
+    if filtered_df is None or filtered_df.empty:
+        st.error("Data not loaded into filtered_df")
+        st.stop()
 
-    fig = go.Figure()
-    fig.add_bar(
-        x=df[x_col], y=df[y_col],
-        name=y_label, marker_color="#4C78A8", text=df[y_col],
-        texttemplate='%{y}', textposition='outside'
+    # -------------------------------
+    # PLOT FUNCTION
+    # -------------------------------
+    def plot_bar_chart(df, category_name, x_col, y_col="Total", y_label="Quantity"):
+        if df.empty:
+            st.warning(f"No data for {category_name}")
+            return
+
+        df = df.sort_values(by=y_col, ascending=False)
+
+        fig = go.Figure()
+        fig.add_bar(
+            x=df[x_col],
+            y=df[y_col],
+            text=df[y_col],
+            textposition='outside',
+            marker_color="#4C78A8"
+        )
+
+        fig.update_layout(
+            title=f"{category_name} Overview",
+            xaxis_title=x_col,
+            yaxis_title=y_label,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            yaxis=dict(gridcolor='rgba(255,255,255,0.3)'),
+            xaxis_tickangle=-30
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    # -------------------------------
+    # COLLECT CV7 POLES
+    # -------------------------------
+    cv7_items = set().union(*[
+        cat.keys() for cat in [CV7_erect, CV7_erect_lv, CV7_recover] if cat
+    ])
+    cv7_poles = filtered_df.loc[filtered_df['item'].isin(cv7_items), 'pole'].dropna().unique()
+
+    # -------------------------------
+    # FILTER CV8 POLES (ONLY ITEMS IN CV8 MAPPING)
+    # -------------------------------
+    CV8_items = set(CV8.keys())
+    cv8_df = filtered_df.loc[
+        (~filtered_df['pole'].isin(cv7_poles)) &      # exclude CV7 poles
+        (filtered_df['pole'].notna()) &              # ignore NaN poles
+        (filtered_df['item'].isin(CV8_items))        # only include CV8 items
+    ].copy()
+
+    # -------------------------------
+    # ASSIGN CV8 TYPE
+    # -------------------------------
+    cv8_df['CV8_type'] = np.where(
+        cv8_df['project'].astype(str).str.upper().str.contains('LV', na=False),
+        'CV8_LV',
+        'CV8_HV'
     )
-    fig.update_layout(
-        title=f"{category_name} Overview",
-        xaxis_title=x_col,
-        yaxis_title=y_label,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        yaxis=dict(gridcolor='rgba(255,255,255,0.3)')
-    )
-    st.plotly_chart(fig, use_container_width=True, height=500)
 
-# -------------------------------
-# COLLECT ALL CV7 POLES
-# -------------------------------
-cv7_poles = pd.concat([
-    filtered_df[filtered_df['item'].isin(cat.keys())]['pole']
-    for cat in [CV7_erect, CV7_erect_lv, CV7_recover] if cat
-]).dropna().unique()
+    # -------------------------------
+    # AGGREGATE SUMMARY
+    # -------------------------------
+    cv8_summary = cv8_df.groupby('CV8_type', as_index=False)['pole'].nunique().rename(columns={'pole': 'Total'})
 
-# -------------------------------
-# FILTER CV8 POLES (EXCLUDE CV7)
-# -------------------------------
-cv8_df = filtered_df[~filtered_df['pole'].isin(cv7_poles)].copy()
+    # -------------------------------
+    # PLOT BAR CHART
+    # -------------------------------
+    plot_bar_chart(cv8_summary, "CV8 Unique Poles", x_col="CV8_type", y_col="Total", y_label="Unique Poles")
 
-# Optional: assign HV/LV type based on project or other logic
-cv8_df['CV8_type'] = cv8_df['project'].apply(
-    lambda x: 'CV8_LV' if 'LV' in str(x).upper() else 'CV8_HV'
-)
+    # -------------------------------
+    # DATE NORMALISATION
+    # -------------------------------
+    date_cols = ['datetouse', 'plan1', 'done']
+    existing_cols = [col for col in date_cols if col in cv8_df.columns]
 
-# -------------------------------
-# AGGREGATE: UNIQUE POLES BY TYPE
-# -------------------------------
-cv8_summary = cv8_df.groupby('CV8_type').agg(
-    Total=('pole', 'nunique')
-).reset_index()
+    if existing_cols:
+        formatted_dates = (
+            cv8_df[existing_cols]
+            .apply(pd.to_datetime, errors='coerce')
+            .apply(lambda col: col.dt.strftime("%d/%m/%Y"))
+            .fillna("Missing")
+        )
+        formatted_dates.columns = [col + '_display' for col in existing_cols]
+        cv8_df = pd.concat([cv8_df, formatted_dates], axis=1)
 
-
-# -------------------------------
-# PLOT CV8 BAR CHART
-# -------------------------------
-plot_bar_chart(cv8_summary, "CV8 Unique Poles", x_col="CV8_type", y_col="Total", y_label="Unique Poles")
-
-# -------------------------------
-# DATE NORMALIZATION FOR CV8
-# -------------------------------
-date_cols = ['datetouse', 'plan1', 'done']
-
-for col in date_cols:
-    if col in cv8_df.columns:
-        cv8_df[col + '_display'] = pd.to_datetime(
-            cv8_df[col], errors='coerce'
-        ).dt.strftime("%d/%m/%Y").fillna("Missing")
-    else:
+    # Fill missing date columns
+    for col in set(date_cols) - set(existing_cols):
         cv8_df[col + '_display'] = "Missing"
 
-# -------------------------------
-# CV8 DRILL-DOWN TABLE
-# -------------------------------
-with st.expander("🔍 CV8 Drill-down: Unique Poles Details", expanded=False):
-    display_cols = ['project', 'segmentcode', 'segmentdesc', 'pole', 'item', 'comment', 'plan1_display', 'done_display']
-    display_cols = [c for c in display_cols if c in cv8_df.columns]
-    display_df = cv8_df[display_cols].drop_duplicates(subset=['pole'])
-    st.dataframe(display_df, use_container_width=True)
-    st.write(f"**Total unique poles displayed:** {display_df['pole'].nunique()}")
+    # -------------------------------
+    # DRILL-DOWN TABLE
+    # -------------------------------
+    with st.expander("🔍 CV8 Drill-down: Unique Poles Details", expanded=False):
+        display_cols = [
+            'project', 'segmentcode', 'segmentdesc',
+            'pole', 'item', 'comment',
+            'plan1_display', 'done_display'
+        ]
+        display_cols = [c for c in display_cols if c in cv8_df.columns]
+
+        display_df = cv8_df[display_cols].drop_duplicates(subset='pole').sort_values('pole')
+        st.dataframe(display_df, use_container_width=True)
+        st.write(f"**Total unique poles displayed:** {display_df['pole'].nunique()}")
+
+    return cv8_df, cv8_summary
+# --------------------------------------------------
+# CALL FUNCTION
+# --------------------------------------------------
+cv8_df, cv8_summary = run_cv8_analysis(
+    filtered_df,
+    CV7_erect,
+    CV7_erect_lv,
+    CV7_recover,
+    CV8  # pass your CV8 dictionary here
+)
 
 
 
