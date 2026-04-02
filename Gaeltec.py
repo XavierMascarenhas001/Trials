@@ -28,6 +28,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import numbers
 import plotly.graph_objects as go
+import numpy as np
 # ---- Formatting & logos (after all sheets written) ----
 
 # --- Page config for wide layout ---
@@ -783,6 +784,41 @@ CV8 = {
     "Replace jumper / dropper with live line bail and flexible jumper conductor": "CV8",
     "Replace / Repair conductor with mid span joint using compression connection": "CV8",
     "Conductor repair; piece in conductor including compression joints": "CV8",
+    "Bind In Conductors; 1.ph 11kV Intermediate / Pin Angle pole.": "CV8",
+    "Bind In Conductors; 3.ph 11kV Intermediate / Pin Angle pole.": "CV8",
+    "Conductor Terminations - 1.ph 11kV Section pole including jumpers.": "CV8",
+    "Conductor Terminations - 3.ph 11kV Section pole including jumpers.": "CV8",
+    "Conductor Terminations - 1.ph 11kV Terminal pole.": "CV8",
+    "Conductor Terminations - 3.ph 11kV Terminal pole.": "CV8",
+    "Unbind and reregulate existing conductors": "CV8",
+    "Remove Steelwork crossarm item only": "CV8",
+    "Convert 1.ph 11kV Intermediate pole into Section Pole.": "CV8",
+    "Convert 1.ph/3.p.h. 11kV line pole into Terminal Pole.": "CV8",
+    "Convert 3.ph 11kV Intermediate pole into Section Pole.": "CV8",
+    "Change 11kV Insulators to avoid contamination from old conductor": "CV8",
+    "Change 33kV Insulators to avoid contamination from old conductor": "CV8",
+    "Replace 11kV/33kV insulator pin and insulator, including unbinding and binding in" "CV8",
+    "Replace 11kV/33kV insulator binder" "CV8",
+    "Replace tension insulator, 11kV" "CV8",
+    "Replace tension insulator, 33kV" "CV8",
+    "Replace 11kV/33kV dead end termination" "CV8",
+    "Additional cost for erection of pilot pin and insulator or pilot post insulator (11kV or 33kV)" "CV8",
+    "Replace insulated conductor HV/LV earth above ground to first rod" "CV8",
+    "Install Copper Covered Green / Yellow HV Earth or Black LV Earth to foot of pole" "CV8",
+    "Install EHV/ HV Earth Electrode including excavate & reinstate (up to 8mtrs)" "CV8",
+    "Install LV Earth Electrode including excavate & reinstate (up to 28mtrs)" "CV8",
+    "Additional extra over for additional earthing excavated, laid & backfilled" "CV8",
+    "Install Earth Electrode within cable trench" "CV8",
+    "Erect 11kV Cable Termination ( incorporating surge arrestors )" "CV8",
+    "Replace / Fit safety or warning sign, number plates or name plate" "CV8",
+    "Barbed Wire Wrap ACD (or Enhanced) single pole or stay - Replace/Repair" "CV8",
+    "Erect 33kV Cable Termination ( incorporating surge arrestors )" "CV8",
+    "Steelwork bonding repair / fit" "CV8",
+    "Replace LV/HV/Earth guard missing / damaged" "CV8",
+    "Erect 1.ph LV cable pole termination" "CV8",
+    "Erect 3.ph LV cable pole termination" "CV8",
+    "Remove 11kV/33kV Cable termination" "CV8",
+    "Remove LV cable termination" "CV8"
 }
 
 
