@@ -19,7 +19,7 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_COLOR_INDEX
 from collections import OrderedDict
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Border, Side
 import io
@@ -597,9 +597,11 @@ file_project_mapping = {
 CV7_erect = {
     "Erect Single HV/EHV Pole, up to and including 12 metre pole":"CV7 HV pole", 
     "Erect Single HV/EHV Pole, up to and including 12 metre pole.":"CV7  HV pole",
-    "Erect Section Structure 'H' HV/EHV Pole, up to and including 12 metre pole.":"CV7 HV pole"
 }
 
+CV7_erect_H = {
+    "Erect Section Structure 'H' HV/EHV Pole, up to and including 12 metre pole.":"CV7 HV pole"
+}
 
 CV7_erect_lv = {
     "Erect LV Structure Single Pole, up to and including 12 metre pole" :"CV7 LV pole",
@@ -847,6 +849,8 @@ summary_items = [
 
 categories = [
     ("CV7_erect", CV7_erect, "Quantity"),
+    ("CV7_erect_H", CV7_erect_H, "Quantity"),
+    ("CV7_erect_LV", CV7_erect_lv, "Quantity"),
     ("CV7_recover", CV7_recover, "Quantity"),
     ("CV7 Tx", CV7_Tx, "Quantity"),
     ("transformer", transformer, "Quantity"),
@@ -867,7 +871,7 @@ column_rename_map = {
     "segmentcode": "Circuit",
     "datetouse_display": "Date",
     "qty": "Quantity_original",
-    "qvci":"qvci",
+    "qcvi":"qcvi",
     "qsub": "Quantity_used",
     "segmentdesc": "Segment",
     "shire": "District",
@@ -878,7 +882,7 @@ column_rename_map = {
 export_columns = [
     'Output','comment', 'item', 'Quantity_original','qcvi','Quantity_used', 'pole', 'Date',
     'District', 'project', 'Project Manager', 'Circuit', 'Segment',
-    'team lider', 'PID', 'sourcefile'
+    'team lider', 'PID','total', 'orig', 'sourcefile'
 ]
 
 # --- Gradient background ---
@@ -1007,24 +1011,29 @@ selected_team, filtered_df = multiselect_filter(filtered_df, 'team_name', "Selec
 # --- Standardize Date Column ---
 # -------------------------------
 # Convert any existing datetime column to just date (no hours/minutes/seconds)
-if 'datetouse' in filtered_df.columns:
-    filtered_df['datetouse_dt'] = pd.to_datetime(filtered_df['datetouse'], errors='coerce').dt.normalize()
-    # For display purposes in tables, charts, etc.
-    filtered_df['datetouse_display'] = filtered_df['datetouse_dt'].dt.strftime("%d/%m/%Y")
-else:
-    filtered_df['datetouse_dt'] = pd.NaT
-    filtered_df['datetouse_display'] = "Missing"
+# Use the already prepared base_df (which respects the radio button)
+filtered_df = base_df.copy()
+
+# Ensure datetouse_dt stays datetime (safety check)
+filtered_df['datetouse_dt'] = pd.to_datetime(
+    filtered_df['datetouse_dt'], errors='coerce'
+).dt.normalize()
+
+# Create display column ONLY (do not overwrite datetime)
+filtered_df['datetouse_display'] = filtered_df['datetouse_dt'] \
+    .dt.strftime("%d/%m/%Y") \
+    .fillna("Missing")
 
 
 filter_type = st.sidebar.selectbox(
     "Filter by Date",
-    ["Single Day", "Week", "Month", "Year", "Custom Range", "Missing"]
+    ["Single Day", "Week", "Month", "Year", "Custom Range", "Unplanned"]
 )
 
 date_range_str = ""
-if filter_type == "Missing":
+if filter_type == "Unplanned":
     filtered_df = filtered_df[filtered_df['datetouse_dt'].isna()]
-    date_range_str = "Missing"
+    date_range_str = "Unplanned"
 else:
     filtered_df = filtered_df[filtered_df['datetouse_dt'].notna()]
 
@@ -1180,6 +1189,7 @@ convert_to_miles = st.checkbox("Convert Equipment/Conductor Length to Miles")
 
 categories = [
     ("CV7_erect", CV7_erect, "Quantity"),
+    ("CV7_erect_H", CV7_erect_H, "Quantity"),
     ("CV7_erect_lv", CV7_erect_lv, "Quantity"),
     ("CV7_recover", CV7_recover, "Quantity"),
     ("CV7 Tx", CV7_Tx, "Quantity"),
@@ -1221,10 +1231,11 @@ for cat_name, keys, y_label in categories:
     sub_df = filtered_df[mask]
 
     # --- Normalize dates in sub_df ---
-    for col in ['datetouse', 'plan1', 'done']:
+    for col in ['datetouse_dt', 'plan1_display', 'done_display']:
         if col in sub_df.columns:
-            sub_df[col] = pd.to_datetime(sub_df[col], errors='coerce').dt.strftime("%d/%m/%Y")
-            sub_df[col] = sub_df[col].fillna("Missing")
+            sub_df[col + "_display"] = pd.to_datetime(sub_df[col], errors='coerce') \
+                .dt.strftime("%d/%m/%Y") \
+                .fillna("Missing")
 
     # --- Clean numeric columns ---
     sub_df['qcvi_clean'] = pd.to_numeric(sub_df['qcvi'] if 'qcvi' in sub_df.columns else pd.Series(0, index=sub_df.index), errors='coerce').fillna(0)
@@ -1234,19 +1245,42 @@ for cat_name, keys, y_label in categories:
     sub_df.loc[sub_df["item"].isin(recover_h_items), "multiplier"] = 2
     sub_df["adj_value"] = sub_df["qsub_clean"] * sub_df["multiplier"]
 
-    # --- Aggregate ---
+
     if cat_name == "CV31":
-        sub_df_unique_poles = sub_df.drop_duplicates(subset=['pole'])
+        # --- Collect CV7 items ---
+        cv7_items = set().union(
+            *[cat.keys() for cat in [CV7_erect, CV7_erect_H, CV7_erect_lv, CV7_recover] if cat]
+        )
+
+        # --- Get poles used in CV7 ---
+        cv7_poles = sub_df.loc[
+            sub_df['item'].isin(cv7_items), 'pole'
+        ].dropna().unique()
+
+        # --- Exclude CV7 poles from CV31 ---
+        cv31_filtered = sub_df.loc[
+            (~sub_df['pole'].isin(cv7_poles)) &
+            (sub_df['pole'].notna())
+        ].copy()
+
+        # --- Keep only unique poles ---
+        sub_df_unique_poles = cv31_filtered.drop_duplicates(subset=['pole'])
+
+        # --- Aggregate ---
         bar_data = sub_df_unique_poles.groupby('mapped').agg(
             Total=('pole', 'count'),
             Variation=('qcvi_clean', 'sum')
         ).reset_index()
-        drilldown_dict[cat_name] = sub_df_unique_poles.copy()  # match bar chart
+
+        # --- Drilldown matches filtered unique poles ---
+        drilldown_dict[cat_name] = sub_df_unique_poles.copy()
+
     else:
         bar_data = sub_df.groupby('mapped').agg(
             Total=('adj_value', 'sum'),
             Variation=('qcvi_clean', 'sum')
         ).reset_index()
+
         drilldown_dict[cat_name] = sub_df.copy()
 
     bar_data.rename(columns={'mapped':'Mapped'}, inplace=True)
@@ -1346,7 +1380,7 @@ for cat_name, keys, y_label in categories:
 # --------------------------------------------------
 # MAIN CV8 FUNCTION
 # --------------------------------------------------
-def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
+def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_H, CV7_erect_lv, CV7_recover, CV8):
     # SAFETY CHECK
     if filtered_df is None or filtered_df.empty:
         st.error("Data not loaded into filtered_df")
@@ -1384,7 +1418,7 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
     # COLLECT CV7 POLES
     # -------------------------------
     cv7_items = set().union(*[
-        cat.keys() for cat in [CV7_erect, CV7_erect_lv, CV7_recover] if cat
+        cat.keys() for cat in [CV7_erect, CV7_erect_H ,CV7_erect_lv, CV7_recover] if cat
     ])
     cv7_poles = filtered_df.loc[filtered_df['item'].isin(cv7_items), 'pole'].dropna().unique()
 
@@ -1412,7 +1446,7 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
     # -------------------------------
     # DATE NORMALISATION
     # -------------------------------
-    date_cols = ['datetouse', 'plan1', 'done']
+    date_cols = ['datetouse_dt', 'plan1', 'done']
     existing_cols = [col for col in date_cols if col in cv8_df.columns]
 
     if existing_cols:
@@ -1451,6 +1485,7 @@ def run_cv8_analysis(filtered_df, CV7_erect, CV7_erect_lv, CV7_recover, CV8):
 cv8_df, cv8_summary = run_cv8_analysis(
     filtered_df,
     CV7_erect,
+    CV7_erect_H,
     CV7_erect_lv,
     CV7_recover,
     CV8
@@ -1542,13 +1577,14 @@ def sanitize_sheet_name(name: str) -> str:
 
 display_columns = [
     'shire', 'project', 'segmentcode', 'segmentdesc', 'comment',
-    'pole', 'qty', 'qvci', 'qsub', 'plan1', 'done', 'item'
+    'pole', 'qty', 'qcvi', 'qsub', 'plan1', 'done', 'item','total','orig'
 ]
-
-def generate_excel_export(display_columns, drilldown_dict, cv8_df, cv31_summary=None):
+def generate_excel_export(display_columns, drilldown_dict, cv8_df, filtered_df):
     output = io.BytesIO()
 
-    # Helper: enforce display columns
+    # -----------------------------
+    # Prepare individual sheets
+    # -----------------------------
     def prepare_df(df):
         df = df.copy()
         for col in display_columns:
@@ -1557,51 +1593,42 @@ def generate_excel_export(display_columns, drilldown_dict, cv8_df, cv31_summary=
         return df[display_columns].fillna("")
 
     all_data = {}
-
-    # CV7 + CV31
     for name, df in drilldown_dict.items():
         if not df.empty:
             all_data[name] = prepare_df(df)
-
-    # CV8
     if cv8_df is not None and not cv8_df.empty:
         all_data["CV8"] = prepare_df(cv8_df)
+
+    # -----------------------------
+    # Combined_Data: all filtered info
+    # -----------------------------
+    combined_df = filtered_df.copy()
 
     # -----------------------------
     # Build Project Summary
     # -----------------------------
     summary_rows = []
+    if not combined_df.empty:
+        all_projects = combined_df['project'].dropna().unique()
 
-    if all_data:
-        all_projects = pd.concat([df[['project']] for df in all_data.values()], ignore_index=True)['project'].dropna().unique()
         for project in all_projects:
             row = {"project": project}
-            total_qsub = 0
-            total_qvci = 0
 
+            # Per-category values for chart purposes
             for name, df in all_data.items():
                 proj_df = df[df['project'] == project]
-
-                if name == "CV31":
-                    # Use unique pole count for CV31
-                    val = proj_df['pole'].nunique()
-                    row[name] = val
-                    total_qsub += val
-                elif name == "CV8":
-                    # Use unique pole count for CV8
-                    val = proj_df['pole'].nunique()
-                    row[name] = val
-                    total_qsub += val
+                if name in ["CV31", "CV8"]:
+                    val = proj_df['pole'].nunique() if 'pole' in proj_df.columns else 0
                 else:
-                    # Regular numeric sum
-                    qsub = pd.to_numeric(proj_df.get('qsub', 0), errors='coerce').fillna(0).sum()
-                    qvci = pd.to_numeric(proj_df.get('qvci', 0), errors='coerce').fillna(0).sum()
-                    row[name] = qsub
-                    total_qsub += qsub
-                    total_qvci += qvci
+                    val = pd.to_numeric(proj_df['qsub'], errors='coerce').fillna(0).sum() \
+                        if 'qsub' in proj_df.columns else 0
+                row[name] = val
 
-            row["Total"] = total_qsub
-            row["Original"] = total_qvci
+            # Sum Total & Original from Combined_Data
+            proj_combined = combined_df[combined_df['project'] == project]
+            row["total"] = proj_combined['total'].sum() if 'total' in proj_combined.columns else 0
+            row["orig"] = proj_combined['orig'].sum() if 'orig' in proj_combined.columns else 0
+
             summary_rows.append(row)
 
         summary_df = pd.DataFrame(summary_rows)
@@ -1609,25 +1636,120 @@ def generate_excel_export(display_columns, drilldown_dict, cv8_df, cv31_summary=
         summary_df = pd.DataFrame()
 
     # -----------------------------
-    # Write Excel
+    # Openpyxl Workbook
     # -----------------------------
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        if not summary_df.empty:
-            summary_df.to_excel(writer, sheet_name="Project_Summary", index=False)
-        for name, df in all_data.items():
-            sheet_name = sanitize_sheet_name(name)
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-        if all_data:
-            combined_df = pd.concat(all_data.values(), ignore_index=True)
-            combined_df.to_excel(writer, sheet_name="Combined_Data", index=False)
+    wb = Workbook()
+    wb.remove(wb.active)  # remove default sheet
 
+    # Formatting
+    IMG_HEIGHT = 120
+    IMG_WIDTH_SMALL = 120
+    IMG_WIDTH_LARGE = IMG_WIDTH_SMALL * 3
+
+    header_font = Font(bold=True, size=16)
+    header_fill = PatternFill(start_color="00CCFF", end_color="00CCFF", fill_type="solid")
+    thin_side = Side(style="thin")
+    medium_side = Side(style="medium")
+    thick_side = Side(style="thick")
+    light_grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    red_font = Font(color="FF0000")
+    green_font = Font(color="00AA00")
+    black_font = Font(color="000000")
+
+    # -----------------------------
+    # 1️⃣ Project Summary sheet
+    # -----------------------------
+    if not summary_df.empty:
+        ws = wb.create_sheet("Project_Summary")
+        ws.append(summary_df.columns.tolist())
+        for idx, row in summary_df.iterrows():
+            ws.append(row.tolist())
+
+        # Header formatting
+        for col_idx, cell in enumerate(ws[1], start=1):
+            cell.font = header_font
+            cell.fill = header_fill
+            ws.column_dimensions[get_column_letter(col_idx)].width = 20
+            cell.border = Border(
+                left=thick_side if col_idx == 1 else medium_side,
+                right=thick_side if col_idx == ws.max_column else medium_side,
+                top=thick_side,
+                bottom=thick_side
+            )
+
+        # Row alternating colors
+        for row_idx in range(2, ws.max_row + 1):
+            fill = light_grey_fill if row_idx % 2 == 0 else white_fill
+            for col_idx in range(1, ws.max_column + 1):
+                ws.cell(row=row_idx, column=col_idx).fill = fill
+
+
+    # -----------------------------
+    # 2️⃣ Individual Sheets
+    # -----------------------------
+    for name, df in all_data.items():
+        ws = wb.create_sheet(sanitize_sheet_name(name))
+        ws.append(df.columns.tolist())
+        for _, row in df.iterrows():
+            ws.append(row.tolist())
+
+        # Header formatting
+        for col_idx, cell in enumerate(ws[1], start=1):
+            cell.font = header_font
+            cell.fill = header_fill
+            ws.column_dimensions[get_column_letter(col_idx)].width = 20
+            cell.border = Border(
+                left=thick_side if col_idx == 1 else medium_side,
+                right=thick_side if col_idx == ws.max_column else medium_side,
+                top=thick_side,
+                bottom=thick_side
+            )
+
+        # Row alternating colors
+        for row_idx in range(2, ws.max_row + 1):
+            fill = light_grey_fill if row_idx % 2 == 0 else white_fill
+            for col_idx in range(1, ws.max_column + 1):
+                ws.cell(row=row_idx, column=col_idx).fill = fill
+
+    # -----------------------------
+    # 3️⃣ Combined_Data Sheet
+    # -----------------------------
+    if not combined_df.empty:
+        ws = wb.create_sheet("Combined_Data")
+        ws.append(combined_df.columns.tolist())
+        for _, row in combined_df.iterrows():
+            ws.append(row.tolist())
+
+        # Header formatting
+        for col_idx, cell in enumerate(ws[1], start=1):
+            cell.font = header_font
+            cell.fill = header_fill
+            ws.column_dimensions[get_column_letter(col_idx)].width = 20
+            cell.border = Border(
+                left=thick_side if col_idx == 1 else medium_side,
+                right=thick_side if col_idx == ws.max_column else medium_side,
+                top=thick_side,
+                bottom=thick_side
+            )
+
+        # Row alternating colors
+        for row_idx in range(2, ws.max_row + 1):
+            fill = light_grey_fill if row_idx % 2 == 0 else white_fill
+            for col_idx in range(1, ws.max_column + 1):
+                ws.cell(row=row_idx, column=col_idx).fill = fill
+
+    # Save to BytesIO
+    wb.save(output)
+    output.seek(0)
     return output.getvalue()
+
 
 # -------------------------------
 # DOWNLOAD BUTTON
 # -------------------------------
 if drilldown_dict or (cv8_df is not None and not cv8_df.empty):
-    excel_bytes = generate_excel_export(display_columns, drilldown_dict, cv8_df)
+    excel_bytes = generate_excel_export(display_columns, drilldown_dict, cv8_df, filtered_df)
     st.download_button(
         label="📥 Export All Data to Excel",
         data=excel_bytes,
