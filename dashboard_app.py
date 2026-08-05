@@ -6,25 +6,6 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
  
-# ============================================================
-# CONFIG - adjust these if your real column names differ
-# ============================================================
-CONFIG = {
-    "district_col": "shire",
-    "project_col": "project",
-    "circuit_col": "segmentcode",
-    "item_col": "item",
-    "pole_col": "pole",            # -> displayed as "enid"
-    "pid_col": "pid_ohl_nr",       # -> displayed as "PID"
-    "qsub_col": "qsub",
-    "total_col": "total",
-    "orig_col": "orig",
-    "date_col_candidates": ["datetouse", "plan1", "done"],
-    # "job" wasn't in the export script you shared - guessing sourcefile.
-    # Change this to the real column if it's something else.
-    "job_col": "sourcefile",
-}
- 
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
 # ============================================================
@@ -342,7 +323,7 @@ with st.sidebar.expander("⚙️ Column mapping (advanced)", expanded=False):
         "pid_col": pick("PID", guess("pid_ohl_nr", "pid"), "map_pid"),
         "total_col": pick("Total value", guess("total"), "map_total"),
         "orig_col": pick("Original value", guess("orig", "original"), "map_orig"),
-        "job_col": pick("Job", guess("sourcefile", "job"), "map_job"),
+        "job_col": pick("Job", guess("job", "sourcefile"), "map_job"),
         "date_col": pick("Date", guess("datetouse", "date", "plan1", "done"), "map_date"),
     }
  
