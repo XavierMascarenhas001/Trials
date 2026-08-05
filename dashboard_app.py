@@ -201,6 +201,25 @@ def clean_job(value):
     return text.strip()
  
  
+# Native unit each category's qsub is recorded in - used to format the
+# mapped-item cards for conductor lengths.
+UNIT_CONFIG = {
+    "CV7_OHL_CONDUCTOR_recover": "m",
+    "CV7_OHL_CONDUCTOR_LV_recover": "m",
+    "CV7_OHL_CONDUCTOR_instal": "km",
+    "CV7_OHL_CONDUCTOR_LV_instal": "km",
+}
+ 
+ 
+def format_length(value, native_unit):
+    """Converts value (in native_unit) to meters, then displays in km if
+    the meters equivalent is >=1000, otherwise in meters."""
+    meters = value * 1000 if native_unit == "km" else value
+    if meters >= 1000:
+        return f"{meters / 1000:,.2f} km"
+    return f"{meters:,.0f} m"
+ 
+ 
 def dedupe_jobs(values, threshold=0.65):
     kept, is_dup = [], []
     for v in values:
@@ -300,38 +319,36 @@ def guess(*candidates):
     return None
  
  
-st.sidebar.header("🔧 Column mapping")
-st.sidebar.caption("Confirm each field maps to the right column in your file.")
-col_options = list(raw_df.columns)
-none_option = ["(none)"] + col_options
+with st.sidebar.expander("⚙️ Column mapping (advanced)", expanded=False):
+    st.caption("Confirm each field maps to the right column in your file.")
+    col_options = list(raw_df.columns)
+    none_option = ["(none)"] + col_options
  
+    def pick(label, default_col, key):
+        opts = none_option
+        idx = opts.index(default_col) if default_col in opts else 0
+        if default_col is None:
+            st.warning(f"Couldn't guess a column for **{label}** - pick one.")
+        val = st.selectbox(label, opts, index=idx, key=key)
+        return None if val == "(none)" else val
  
-def pick(label, default_col, key):
-    opts = none_option
-    idx = opts.index(default_col) if default_col in opts else 0
-    if default_col is None:
-        st.sidebar.warning(f"Couldn't guess a column for **{label}** - pick one.")
-    val = st.sidebar.selectbox(label, opts, index=idx, key=key)
-    return None if val == "(none)" else val
- 
- 
-cols = {
-    "item_col": pick("Description / item", guess("item", "description"), "map_item"),
-    "qsub_col": pick("Quantity (qsub)", guess("qsub", "quantity_used"), "map_qsub"),
-    "district_col": pick("District", guess("shire", "district"), "map_district"),
-    "project_col": pick("Project", guess("project"), "map_project"),
-    "circuit_col": pick("Circuit", guess("segmentcode", "circuit"), "map_circuit"),
-    "pole_col": pick("Pole / enid", guess("pole", "enid"), "map_pole"),
-    "pid_col": pick("PID", guess("pid_ohl_nr", "pid"), "map_pid"),
-    "total_col": pick("Total value", guess("total"), "map_total"),
-    "orig_col": pick("Original value", guess("orig", "original"), "map_orig"),
-    "job_col": pick("Job", guess("sourcefile", "job"), "map_job"),
-    "date_col": pick("Date", guess("datetouse", "date", "plan1", "done"), "map_date"),
-}
+    cols = {
+        "item_col": pick("Description / item", guess("item", "description"), "map_item"),
+        "qsub_col": pick("Quantity (qsub)", guess("qsub", "quantity_used"), "map_qsub"),
+        "district_col": pick("District", guess("shire", "district"), "map_district"),
+        "project_col": pick("Project", guess("project"), "map_project"),
+        "circuit_col": pick("Circuit", guess("segmentcode", "circuit"), "map_circuit"),
+        "pole_col": pick("Pole / enid", guess("pole", "enid"), "map_pole"),
+        "pid_col": pick("PID", guess("pid_ohl_nr", "pid"), "map_pid"),
+        "total_col": pick("Total value", guess("total"), "map_total"),
+        "orig_col": pick("Original value", guess("orig", "original"), "map_orig"),
+        "job_col": pick("Job", guess("sourcefile", "job"), "map_job"),
+        "date_col": pick("Date", guess("datetouse", "date", "plan1", "done"), "map_date"),
+    }
  
 missing_required = [k for k in ["item_col", "qsub_col", "district_col", "circuit_col"] if cols[k] is None]
 if missing_required:
-    st.error(f"These required fields still need a column picked in the sidebar: {missing_required}")
+    st.error(f"These required fields still need a column picked in the sidebar 'Column mapping' section: {missing_required}")
     st.stop()
  
 df = process_data(raw_df, cols)
@@ -429,9 +446,12 @@ with tab_jobs:
             "Circuit": f[circuit_col],
             "PID": f[cols["pid_col"]] if cols["pid_col"] in f.columns else "",
         })
-        job_table["_dup"] = dedupe_jobs(job_table["Job"].tolist())
-        job_table = job_table[~job_table["_dup"]].drop(columns="_dup")
-        st.caption(f"{len(job_table):,} unique jobs (≥65% similar names collapsed)")
+        st.caption(f"{len(job_table):,} rows under the current filters")
+        collapse = st.checkbox("Collapse near-duplicate job names (≥65% similar)", value=False, key="jobs_dedupe")
+        if collapse:
+            job_table["_dup"] = dedupe_jobs(job_table["Job"].tolist())
+            job_table = job_table[~job_table["_dup"]].drop(columns="_dup")
+            st.caption(f"{len(job_table):,} rows after collapsing")
         st.dataframe(job_table, height=420, use_container_width=True, hide_index=True)
     else:
         st.caption("No job column selected in the sidebar mapping.")
@@ -455,7 +475,10 @@ with tab_items:
         for row in rows:
             row_cols = st.columns(n_cols)
             for slot, (cat_name, total_qty, _sub) in zip(row_cols, row):
-                slot.metric(cat_name, f"{total_qty:,.0f}")
+                if cat_name in UNIT_CONFIG:
+                    slot.metric(cat_name, format_length(total_qty, UNIT_CONFIG[cat_name]))
+                else:
+                    slot.metric(cat_name, f"{total_qty:,.0f}")
  
         st.divider()
         chosen = st.selectbox("View details for", [c[0] for c in card_data])
@@ -482,12 +505,36 @@ with tab_totals:
     if total_val is not None and orig_val is not None:
         f["_row_variance"] = pd.to_numeric(f[cols["total_col"]], errors="coerce") - pd.to_numeric(f[cols["orig_col"]], errors="coerce")
         variance_rows = f[f["_row_variance"] != 0]
+ 
+        st.subheader("Jobs where total ≠ original")
         variance_table = pd.DataFrame({
             "District": variance_rows[district_col],
             "Job": variance_rows["_job_clean"],
             "Circuit": variance_rows[circuit_col],
+            "Difference (£)": variance_rows["_row_variance"],
         })
-        variance_table["is_dup"] = dedupe_jobs(variance_table["Job"].tolist())
-        variance_table = variance_table[~variance_table["is_dup"]].drop(columns="is_dup")
-        st.caption("Rows where total differs from the original value")
-        st.dataframe(variance_table, height=320, use_container_width=True, hide_index=True)
+        st.caption(f"{len(variance_table):,} rows with a variance under the current filters")
+        st.dataframe(
+            variance_table.sort_values("Difference (£)", key=abs, ascending=False),
+            height=320, use_container_width=True, hide_index=True,
+        )
+ 
+        st.subheader("Difference by Job")
+        by_job = (
+            variance_rows.assign(Job=variance_rows["_job_clean"])
+            .groupby("Job")["_row_variance"].sum()
+            .reset_index()
+            .rename(columns={"_row_variance": "Difference (£)"})
+            .sort_values("Difference (£)", key=abs, ascending=False)
+        )
+        st.dataframe(by_job, height=280, use_container_width=True, hide_index=True)
+ 
+        st.subheader("Difference by Project")
+        if project_col in variance_rows.columns:
+            by_project = (
+                variance_rows.groupby(project_col)["_row_variance"].sum()
+                .reset_index()
+                .rename(columns={project_col: "Project", "_row_variance": "Difference (£)"})
+                .sort_values("Difference (£)", key=abs, ascending=False)
+            )
+            st.dataframe(by_project, height=280, use_container_width=True, hide_index=True)
