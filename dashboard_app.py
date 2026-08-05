@@ -262,7 +262,22 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
 # ============================================================
 # APP
 # ============================================================
-st.title("Network Job Tracker Dashboard")
+st.markdown(
+    """
+    <style>
+    div[data-testid="stMetric"] {
+        background-color: #f5f7fa;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 14px 16px;
+    }
+    div[data-testid="stMetricLabel"] { font-weight: 600; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+ 
+st.title("⚡ Network Job Tracker Dashboard")
  
 uploaded = st.file_uploader("Upload your parquet or CSV file", type=["parquet", "csv"])
 if not uploaded:
@@ -276,69 +291,79 @@ with st.expander("Detected columns in your file (click to view)"):
  
  
 def guess(*candidates):
+    """Returns the first candidate that exists as a real column, or None if none match.
+    (Previously this fell back to the file's first column, which silently mismapped
+    fields when nothing matched - that's what broke the mapping/filters.)"""
     for c in candidates:
         if c in raw_df.columns:
             return c
-    return raw_df.columns[0]
+    return None
  
  
-st.sidebar.header("Column mapping")
-st.sidebar.caption("Match each field to your file's real column names.")
+st.sidebar.header("🔧 Column mapping")
+st.sidebar.caption("Confirm each field maps to the right column in your file.")
 col_options = list(raw_df.columns)
- 
-def pick(label, default_col):
-    idx = col_options.index(default_col) if default_col in col_options else 0
-    return st.sidebar.selectbox(label, col_options, index=idx)
- 
 none_option = ["(none)"] + col_options
  
-def pick_optional(label, default_col):
+ 
+def pick(label, default_col, key):
     opts = none_option
     idx = opts.index(default_col) if default_col in opts else 0
-    val = st.sidebar.selectbox(label, opts, index=idx)
+    if default_col is None:
+        st.sidebar.warning(f"Couldn't guess a column for **{label}** - pick one.")
+    val = st.sidebar.selectbox(label, opts, index=idx, key=key)
     return None if val == "(none)" else val
  
+ 
 cols = {
-    "item_col": pick("Description / item", guess("item", "description")),
-    "qsub_col": pick("Quantity (qsub)", guess("qsub", "quantity_used")),
-    "district_col": pick("District", guess("shire", "district")),
-    "project_col": pick("Project", guess("project")),
-    "circuit_col": pick("Circuit", guess("segmentcode", "circuit")),
-    "pole_col": pick("Pole / enid", guess("pole", "enid")),
-    "pid_col": pick("PID", guess("pid_ohl_nr", "pid")),
-    "total_col": pick("Total value", guess("total")),
-    "orig_col": pick("Original value", guess("orig", "original")),
-    "job_col": pick_optional("Job", guess("sourcefile", "job") if "sourcefile" in raw_df.columns or "job" in raw_df.columns else None),
-    "date_col": pick_optional("Date", guess("datetouse", "plan1", "done") if any(c in raw_df.columns for c in ["datetouse", "plan1", "done"]) else None),
+    "item_col": pick("Description / item", guess("item", "description"), "map_item"),
+    "qsub_col": pick("Quantity (qsub)", guess("qsub", "quantity_used"), "map_qsub"),
+    "district_col": pick("District", guess("shire", "district"), "map_district"),
+    "project_col": pick("Project", guess("project"), "map_project"),
+    "circuit_col": pick("Circuit", guess("segmentcode", "circuit"), "map_circuit"),
+    "pole_col": pick("Pole / enid", guess("pole", "enid"), "map_pole"),
+    "pid_col": pick("PID", guess("pid_ohl_nr", "pid"), "map_pid"),
+    "total_col": pick("Total value", guess("total"), "map_total"),
+    "orig_col": pick("Original value", guess("orig", "original"), "map_orig"),
+    "job_col": pick("Job", guess("sourcefile", "job"), "map_job"),
+    "date_col": pick("Date", guess("datetouse", "date", "plan1", "done"), "map_date"),
 }
+ 
+missing_required = [k for k in ["item_col", "qsub_col", "district_col", "circuit_col"] if cols[k] is None]
+if missing_required:
+    st.error(f"These required fields still need a column picked in the sidebar: {missing_required}")
+    st.stop()
  
 df = process_data(raw_df, cols)
  
-# ---- Sidebar filters ----
-st.sidebar.header("Filters")
- 
 district_col, project_col, circuit_col = cols["district_col"], cols["project_col"], cols["circuit_col"]
+ 
+# ---- Sidebar filters ----
+st.sidebar.header("🔍 Filters")
  
 if df["_date"].notna().any():
     min_d, max_d = df["_date"].min(), df["_date"].max()
     date_range = st.sidebar.date_input("Date", value=(min_d.date(), max_d.date()))
 else:
     date_range = None
+    st.sidebar.caption("No usable dates found in the selected Date column.")
  
-def multiselect_filter(label, col):
-    if col not in df.columns:
+ 
+def multiselect_filter(label, col, key):
+    if not col or col not in df.columns:
         return []
     opts = sorted(df[col].dropna().astype(str).unique())
-    return st.sidebar.multiselect(label, opts)
+    return st.sidebar.multiselect(label, opts, key=key)
  
-districts = multiselect_filter("District", district_col)
-projects = multiselect_filter("Project", project_col)
-circuits = multiselect_filter("Circuit", circuit_col)
+ 
+districts = multiselect_filter("District", district_col, "f_district")
+projects = multiselect_filter("Project", project_col, "f_project")
+circuits = multiselect_filter("Circuit", circuit_col, "f_circuit")
  
 f = df.copy()
 if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
-    start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
-    f = f[(f["_date"] >= start) & (f["_date"] <= end) | f["_date"].isna()]
+    start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    f = f[f["_date"].between(start, end)]
 if districts:
     f = f[f[district_col].astype(str).isin(districts)]
 if projects:
@@ -346,73 +371,123 @@ if projects:
 if circuits:
     f = f[f[circuit_col].astype(str).isin(circuits)]
  
-# ---- Pole bar chart ----
-st.subheader("Poles")
-pole_keys = set()
-for mapping in POLE_CATEGORIES.values():
-    pole_keys |= {normalize_item(k) for k in mapping}
-pole_df = f[f["_item_norm"].isin(pole_keys)]
-pole_summary = (
-    pole_df.groupby("_mapped_category")["_qsub_adj"].sum().reset_index()
-    .rename(columns={"_mapped_category": "Pole type", "_qsub_adj": "Count"})
+st.sidebar.divider()
+st.sidebar.metric("Rows after filters", f"{len(f):,}", delta=f"of {len(df):,} total")
+ 
+tab_overview, tab_jobs, tab_items, tab_totals = st.tabs(
+    ["📊 Overview", "🗂️ Jobs", "📦 Mapped Items", "💰 Totals"]
 )
-if not pole_summary.empty:
-    fig = px.bar(pole_summary, x="Pole type", y="Count", text="Count")
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.caption("No pole records for the current filters.")
  
-# ---- Job / Circuit / PID table (deduped, scrollable) ----
-st.subheader("Jobs")
-job_table = f[[cols["job_col"], circuit_col, cols["pid_col"]]].copy() if cols["job_col"] in f.columns else pd.DataFrame()
-if not job_table.empty:
-    job_table["job"] = f["_job_clean"]
-    job_table = job_table[["job", circuit_col, cols["pid_col"]]].rename(
-        columns={circuit_col: "Circuit", cols["pid_col"]: "PID"}
-    )
-    job_table["_dup"] = dedupe_jobs(job_table["job"].tolist())
-    job_table = job_table[~job_table["_dup"]].drop(columns="_dup")
-    st.dataframe(job_table, height=350, use_container_width=True)  # fixed height -> scrolls internally
-else:
-    st.caption("No job column selected in the sidebar mapping.")
+# ---- Overview: CV7_recover over time ----
+with tab_overview:
+    st.subheader("CV7_recover — count over time")
+    recover_keys = {normalize_item(k) for k in CV7_recover}
+    recover_df = f[f["_item_norm"].isin(recover_keys)]
  
-# ---- Per-mapped-item breakdown ----
-st.subheader("Mapped items")
-for cat_name, mapping in ALL_CATEGORIES.items():
-    keys = {normalize_item(k) for k in mapping}
-    sub = f[f["_item_norm"].isin(keys)]
-    if sub.empty:
-        continue
-    total_qty = sub["_qsub_adj"].sum()
-    with st.expander(f"{cat_name} - {total_qty:,.0f}"):
-        detail = sub[[district_col, "_job_clean", circuit_col, cols["pole_col"]]].rename(
-            columns={
-                district_col: "District",
-                "_job_clean": "Job",
-                circuit_col: "Circuit",
-                cols["pole_col"]: "enid",
-            }
+    if recover_df.empty or recover_df["_date"].isna().all():
+        st.caption("No CV7_recover records (with a date) for the current filters.")
+    else:
+        granularity = st.radio("Group by", ["Day", "Week", "Month"], index=2, horizontal=True)
+        freq = {"Day": "D", "Week": "W", "Month": "MS"}[granularity]
+        trend = (
+            recover_df.dropna(subset=["_date"])
+            .set_index("_date")
+            .resample(freq)["_qsub_adj"]
+            .sum()
+            .reset_index()
+            .rename(columns={"_date": "Date", "_qsub_adj": "Count"})
         )
-        st.dataframe(detail, height=250, use_container_width=True)
+        fig = px.bar(trend, x="Date", y="Count", text="Count")
+        fig.update_traces(marker_color="#2563eb")
+        fig.update_layout(margin=dict(t=10, b=10))
+        st.plotly_chart(fig, use_container_width=True)
  
-# ---- Totals & variance ----
-st.subheader("Totals")
-total_val = pd.to_numeric(f[cols["total_col"]], errors="coerce").sum() if cols["total_col"] in f.columns else None
-orig_val = pd.to_numeric(f[cols["orig_col"]], errors="coerce").sum() if cols["orig_col"] in f.columns else None
- 
-c1, c2 = st.columns(2)
-if total_val is not None:
-    c1.metric("Total value", f"£{total_val:,.2f}")
-if total_val is not None and orig_val is not None:
-    c2.metric("Difference vs original", f"£{total_val - orig_val:,.2f}")
- 
-if total_val is not None and orig_val is not None:
-    f["_row_variance"] = pd.to_numeric(f[cols["total_col"]], errors="coerce") - pd.to_numeric(f[cols["orig_col"]], errors="coerce")
-    variance_rows = f[f["_row_variance"] != 0]
-    variance_table = variance_rows[[district_col, "_job_clean", circuit_col]].rename(
-        columns={district_col: "District", "_job_clean": "Job", circuit_col: "Circuit"}
+    st.subheader("All pole categories")
+    pole_keys = set()
+    for mapping in POLE_CATEGORIES.values():
+        pole_keys |= {normalize_item(k) for k in mapping}
+    pole_df = f[f["_item_norm"].isin(pole_keys)]
+    pole_summary = (
+        pole_df.groupby("_mapped_category")["_qsub_adj"].sum().reset_index()
+        .rename(columns={"_mapped_category": "Pole type", "_qsub_adj": "Count"})
     )
-    variance_table["is_dup"] = dedupe_jobs(variance_table["Job"].tolist())
-    variance_table = variance_table[~variance_table["is_dup"]].drop(columns="is_dup")
-    st.caption("Rows where total differs from the original value")
-    st.dataframe(variance_table, height=300, use_container_width=True)
+    if not pole_summary.empty:
+        fig2 = px.bar(pole_summary, x="Pole type", y="Count", text="Count", color="Pole type")
+        fig2.update_layout(showlegend=False, margin=dict(t=10, b=10))
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.caption("No pole records for the current filters.")
+ 
+# ---- Jobs tab ----
+with tab_jobs:
+    st.subheader("Jobs (District → Job → Circuit → PID)")
+    job_col = cols["job_col"]
+    if job_col and job_col in f.columns:
+        job_table = pd.DataFrame({
+            "District": f[district_col],
+            "Job": f["_job_clean"],
+            "Circuit": f[circuit_col],
+            "PID": f[cols["pid_col"]] if cols["pid_col"] in f.columns else "",
+        })
+        job_table["_dup"] = dedupe_jobs(job_table["Job"].tolist())
+        job_table = job_table[~job_table["_dup"]].drop(columns="_dup")
+        st.caption(f"{len(job_table):,} unique jobs (≥65% similar names collapsed)")
+        st.dataframe(job_table, height=420, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No job column selected in the sidebar mapping.")
+ 
+# ---- Mapped items tab: card grid ----
+with tab_items:
+    st.subheader("Mapped items")
+    card_data = []
+    for cat_name, mapping in ALL_CATEGORIES.items():
+        keys = {normalize_item(k) for k in mapping}
+        sub = f[f["_item_norm"].isin(keys)]
+        if sub.empty:
+            continue
+        card_data.append((cat_name, sub["_qsub_adj"].sum(), sub))
+ 
+    if not card_data:
+        st.caption("No mapped items for the current filters.")
+    else:
+        n_cols = 4
+        rows = [card_data[i:i + n_cols] for i in range(0, len(card_data), n_cols)]
+        for row in rows:
+            row_cols = st.columns(n_cols)
+            for slot, (cat_name, total_qty, _sub) in zip(row_cols, row):
+                slot.metric(cat_name, f"{total_qty:,.0f}")
+ 
+        st.divider()
+        chosen = st.selectbox("View details for", [c[0] for c in card_data])
+        _, _, sub = next(c for c in card_data if c[0] == chosen)
+        detail = pd.DataFrame({
+            "District": sub[district_col],
+            "Job": sub["_job_clean"],
+            "Circuit": sub[circuit_col],
+            "enid": sub[cols["pole_col"]] if cols["pole_col"] in sub.columns else "",
+        })
+        st.dataframe(detail, height=320, use_container_width=True, hide_index=True)
+ 
+# ---- Totals tab ----
+with tab_totals:
+    total_val = pd.to_numeric(f[cols["total_col"]], errors="coerce").sum() if cols["total_col"] in f.columns else None
+    orig_val = pd.to_numeric(f[cols["orig_col"]], errors="coerce").sum() if cols["orig_col"] in f.columns else None
+ 
+    c1, c2 = st.columns(2)
+    if total_val is not None:
+        c1.metric("Total value", f"£{total_val:,.2f}")
+    if total_val is not None and orig_val is not None:
+        c2.metric("Difference vs original", f"£{total_val - orig_val:,.2f}")
+ 
+    if total_val is not None and orig_val is not None:
+        f["_row_variance"] = pd.to_numeric(f[cols["total_col"]], errors="coerce") - pd.to_numeric(f[cols["orig_col"]], errors="coerce")
+        variance_rows = f[f["_row_variance"] != 0]
+        variance_table = pd.DataFrame({
+            "District": variance_rows[district_col],
+            "Job": variance_rows["_job_clean"],
+            "Circuit": variance_rows[circuit_col],
+        })
+        variance_table["is_dup"] = dedupe_jobs(variance_table["Job"].tolist())
+        variance_table = variance_table[~variance_table["is_dup"]].drop(columns="is_dup")
+        st.caption("Rows where total differs from the original value")
+        st.dataframe(variance_table, height=320, use_container_width=True, hide_index=True)
