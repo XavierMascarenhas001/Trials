@@ -621,13 +621,14 @@ with tab_items:
     grouped_cat_names = {c for group in CARD_GROUPS for c in group["categories"]}
  
     for group in CARD_GROUPS:
+        title = os.path.splitext(os.path.basename(group["image"]))[0]
         img_l, img_c, img_r = st.columns([1, 1, 1])
         with img_c:
+            st.markdown(f"<p style='text-align:center; font-weight:600; font-size:1.1em;'>{title}</p>", unsafe_allow_html=True)
             if os.path.exists(group["image"]):
-                st.image(group["image"], width=240)
+                st.image(group["image"], width=300)
             else:
                 st.caption(f"⚠️ Image not found: {group['image']}")
-            st.markdown(f"<p style='text-align:center; font-weight:600;'>{group['title']}</p>", unsafe_allow_html=True)
  
         group_cards = []
         for cat_name in group["categories"]:
