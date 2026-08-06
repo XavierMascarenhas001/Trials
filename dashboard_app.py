@@ -624,7 +624,7 @@ with tab_items:
         title = os.path.splitext(os.path.basename(group["image"]))[0]
         img_l, img_c, img_r = st.columns([1, 1, 1])
         with img_c:
-            st.markdown(f"<p style='text-align:center; font-weight:600; font-size:1.1em;'>{title}</p>", unsafe_allow_html=True)
+            st.markdown(f"<h3 style='text-align:center; margin-bottom:0.3rem;'>{title}</h3>", unsafe_allow_html=True)
             if os.path.exists(group["image"]):
                 st.image(group["image"], width=300)
             else:
