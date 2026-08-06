@@ -9,7 +9,10 @@ import plotly.express as px
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
 # ============================================================
-# YOUR MAPPING DICTIONARIES (unchanged from your script)
+# YOUR MAPPING DICTIONARIES
+# (CV8 and Fuses below are now the FULL dictionaries copied from the
+#  export tool - the dashboard versions were truncated, which alone
+#  explained a chunk of the discrepancy)
 # ============================================================
 CV7_erect = {
     "Erect Single HV/EHV Pole, up to and including 12 metre pole": "CV7 HV pole",
@@ -69,25 +72,6 @@ CV7_OHL_CONDUCTOR_LV_recover = {
     "Recover overhead wires and fittings; LV service overhead line (open, concentric or ABC, 5 conductors)": "CV7 OHL CONDUCTOR LV",
     "Recover cleated service": "CV7 OHL CONDUCTOR LV",
 }
-CV7_SWITCHGEAR = {
-    "Erect 11kV/33kV ABSW": "CV7 SWITCHGEAR",
-    "Erect 11kV Remote Controlled Switch Disconnector ( Soule Auguste ) or Auto Reclosure unit c/w VT, Aerial, RTU & umbilical cable.": "CV7 SWITCHGEAR",
-    "Erect 1.ph fuse units at single tee off pole or in line pole.": "CV7 SWITCHGEAR",
-    "Erect 3.ph fuse units at single tee off pole or in line pole.": "CV7 SWITCHGEAR",
-    "Additional cost for fitting fuse outrigger bracket.": "CV7 SWITCHGEAR",
-    "Remove 11kV/33kV ABSW": "CV7 SWITCHGEAR",
-}
-CV7_UG = {
-    "Installation of cable only in trench dug by others; 11kV Cable 3 x 1 core.": "CV7 UG 11 kV",
-    "Install cable in existing duct; 11kV Cable 3 x 1 core.": "CV7 UG 11 kV",
-    "Installation of cable only in trench dug by others; 33kV Cable 3 x 1 core.": "CV7 UG 33 kV",
-    "Install cable in existing duct; 33kV Cable 3 x 1 core.": "CV7 UG 33 kV",
-    "Installation of cable only in trench dug by others; LV Cable Large or 11kV Cable 1 x 3 Core": "CV7 UG",
-    "Install cable in existing duct; LV Cable Large or 11kV Cable 1 x 3 Core": "CV7 UG",
-    "Installation of cable only in trench dug by others; LV Service, Small LV or Pilot Cable.": "CV7 UG LV Service",
-    "Install cable in existing duct; LV Service, Small LV or Pilot Cable.": "CV7 UG LV Service",
-}
-CV7_CB = {"Remove Auto Reclosure.": "CV7 CB"}
 Switch = {
     "Noja": "Noja",
     "11kV PMSW (Soule)": "11kV PMSW (Soule)",
@@ -115,6 +99,37 @@ Fuses = {
     "Cut out Fuse (MF) 100A": "Cut out Fuse (MF) 100A",
     "11KV FUSE UNIT - C-TYPE": "11KV FUSE UNIT - C-TYPE",
     "11KV SOLID LINK - C-TYPE": "11KV SOLID LINK - C-TYPE",
+    "11KV OHL ASL C-TYPE RESET 20A 2 SHOT": "11KV OHL ASL C-TYPE RESET 20A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 25A 2 SHOT": "11KV OHL ASL C-TYPE RESET 25A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 40A 1 SHOT": "11KV OHL ASL C-TYPE RESET 40A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 40A 2 SHOT": "11KV OHL ASL C-TYPE RESET 40A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 1 SHOT": "11KV OHL ASL C-TYPE RESET 63A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 2 SHOT": "11KV OHL ASL C-TYPE RESET 63A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 3 SHOT": "11KV OHL ASL C-TYPE RESET 63A 3 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 1 SHOT": "11KV OHL ASL C-TYPE RESET 100A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 2 SHOT": "11KV OHL ASL C-TYPE RESET 100A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 3 SHOT": "11KV OHL ASL C-TYPE RESET 100A 3 SHOT",
+    "11KV OHL FUSE ELEMENT C-TYPE 15A": "11KV OHL FUSE ELEMENT C-TYPE 15A",
+    "11KV OHL FUSE ELEMENT C-TYPE 25A": "11KV OHL FUSE ELEMENT C-TYPE 25A",
+    "11KV OHL FUSE ELEMENT C-TYPE 30A": "11KV OHL FUSE ELEMENT C-TYPE 30A",
+    "11KV OHL FUSE ELEMENT C-TYPE 40A": "11KV OHL FUSE ELEMENT C-TYPE 40A",
+    "11KV OHL FUSE ELEMENT C-TYPE 50A": "11KV OHL FUSE ELEMENT C-TYPE 50A",
+    "11KV OHL ASL DJP-TYPE 20A 2 SHOT": "11KV OHL ASL DJP-TYPE 20A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 25A 1 SHOT": "11KV OHL ASL DJP-TYPE 25A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 25A 2 SHOT": "11KV OHL ASL DJP-TYPE 25A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 40A 1 SHOT": "11KV OHL ASL DJP-TYPE 40A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 40A 2 SHOT": "11KV OHL ASL DJP-TYPE 40A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 1 SHOT": "11KV OHL ASL DJP-TYPE 63A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 2 SHOT": "11KV OHL ASL DJP-TYPE 63A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 3 SHOT": "11KV OHL ASL DJP-TYPE 63A 3 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 1 SHOT": "11KV OHL ASL DJP-TYPE 100A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 2 SHOT": "11KV OHL ASL DJP-TYPE 100A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 3 SHOT": "11KV OHL ASL DJP-TYPE 100A 3 SHOT",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 15A": "11KV OHL FUSE ELEMENT DJP-TYPE 15A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 25A": "11KV OHL FUSE ELEMENT DJP-TYPE 25A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 30A": "11KV OHL FUSE ELEMENT DJP-TYPE 30A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 40A": "11KV OHL FUSE ELEMENT DJP-TYPE 40A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 50A": "11KV OHL FUSE ELEMENT DJP-TYPE 50A",
 }
 CV31 = {
     "Replace / Fit safety or warning sign, number plates or name plate": "CV31",
@@ -127,7 +142,54 @@ CV8 = {
     "Erect/Replace stay above ground only.": "CV8",
     "Erect/Replace stay complete including block or driven type anchor": "CV8",
     "Erect/Replace stay complete including rock type anchor": "CV8",
-}  # (trimmed here for brevity - paste your full CV8 dict back in if you need every line mapped)
+    "Retrofit structure with Anchor Clamp fitting for Section / Angle / Terminal support": "CV8",
+    "Erect Single Crossarm to single pole.": "CV8",
+    "Erect Double Crossarm 'H' Pole formation": "CV8",
+    "Remove Steelwork crossarm item only": "CV8",
+    "Change 11kV Insulators to avoid contamination from old conductor": "CV8",
+    "Change 33kV Insulators to avoid contamination from old conductor": "CV8",
+    "Replace tension insulator, 11kV.": "CV8",
+    "Replace tension insulator, 33kV.": "CV8",
+    "Additional cost for fitting Stay Outrigger Bracket": "CV8",
+    "Additional cost for fitting Angle / Terminal stay attachment plates on Heavy Construction as SP4009862": "CV8",
+    "Recover and reinstate stay position,all ground conditions.": "CV8",
+    "Fit foundation block to existing pole.": "CV8",
+    "Fit bog shoe foundation to existing single pole.": "CV8",
+    "Replace jumper / dropper mechanical connection with compression connection": "CV8",
+    "Replace jumper / dropper with live line bail and flexible jumper conductor": "CV8",
+    "Replace / Repair conductor with mid span joint using compression connection": "CV8",
+    "Conductor repair; piece in conductor including compression joints": "CV8",
+    "Bind In Conductors; 1.ph 11kV Intermediate / Pin Angle pole.": "CV8",
+    "Bind In Conductors; 3.ph 11kV Intermediate / Pin Angle pole.": "CV8",
+    "Conductor Terminations - 1.ph 11kV Section pole including jumpers.": "CV8",
+    "Conductor Terminations - 3.ph 11kV Section pole including jumpers.": "CV8",
+    "Conductor Terminations - 1.ph 11kV Terminal pole.": "CV8",
+    "Conductor Terminations - 3.ph 11kV Terminal pole.": "CV8",
+    "Unbind and reregulate existing conductors": "CV8",
+    "Convert 1.ph 11kV Intermediate pole into Section Pole.": "CV8",
+    "Convert 1.ph/3.p.h. 11kV line pole into Terminal Pole.": "CV8",
+    "Convert 3.ph 11kV Intermediate pole into Section Pole.": "CV8",
+    "Replace 11kV/33kV insulator pin and insulator, including unbinding and binding in": "CV8",
+    "Replace 11kV/33kV insulator binder": "CV8",
+    "Replace tension insulator, 11kV": "CV8",
+    "Replace tension insulator, 33kV": "CV8",
+    "Replace 11kV/33kV dead end termination": "CV8",
+    "Additional cost for erection of pilot pin and insulator or pilot post insulator (11kV or 33kV)": "CV8",
+    "Replace insulated conductor HV/LV earth above ground to first rod": "CV8",
+    "Install Copper Covered Green / Yellow HV Earth or Black LV Earth to foot of pole": "CV8",
+    "Install EHV/ HV Earth Electrode including excavate & reinstate (up to 8mtrs)": "CV8",
+    "Install LV Earth Electrode including excavate & reinstate (up to 28mtrs)": "CV8",
+    "Additional extra over for additional earthing excavated, laid & backfilled": "CV8",
+    "Install Earth Electrode within cable trench": "CV8",
+    "Erect 11kV Cable Termination ( incorporating surge arrestors )": "CV8",
+    "Erect 33kV Cable Termination ( incorporating surge arrestors )": "CV8",
+    "Steelwork bonding repair / fit": "CV8",
+    "Erect 1.ph LV cable pole termination": "CV8",
+    "Erect 3.ph LV cable pole termination": "CV8",
+    "Remove 11kV/33kV Cable termination": "CV8",
+    "Remove LV cable termination": "CV8",
+    "Repair pole twist - including unbind / rebind.": "CV8",
+}
  
 POLE_CATEGORIES = {
     "CV7_erect": CV7_erect,
@@ -135,6 +197,14 @@ POLE_CATEGORIES = {
     "CV7_erect_lv": CV7_erect_lv,
     "CV7_recover": CV7_recover,
 }
+ 
+# NOTE: CV7_SWITCHGEAR / CV7_UG / CV7_CB were removed from ALL_CATEGORIES.
+# In the export tool, `categories` gets redefined a second time and that
+# second definition (the one actually used to build sheets/Summary) never
+# includes these three - so the exporter never produces a "true" value for
+# them. Showing cards for them here would just be comparing against
+# nothing. If you do want them tracked, they need to be added back into
+# the export tool's `categories`/`extra_categories` lists first.
 ALL_CATEGORIES = {
     **POLE_CATEGORIES,
     "CV7_Tx": CV7_Tx,
@@ -143,26 +213,38 @@ ALL_CATEGORIES = {
     "CV7_OHL_CONDUCTOR_recover": CV7_OHL_CONDUCTOR_recover,
     "CV7_OHL_CONDUCTOR_LV_instal": CV7_OHL_CONDUCTOR_LV_instal,
     "CV7_OHL_CONDUCTOR_LV_recover": CV7_OHL_CONDUCTOR_LV_recover,
-    "CV7_SWITCHGEAR": CV7_SWITCHGEAR,
-    "CV7_UG": CV7_UG,
-    "CV7_CB": CV7_CB,
     "Switch": Switch,
     "Fuses": Fuses,
     "CV31": CV31,
     "CV8": CV8,
 }
  
+# Categories that use the exporter's process_cv() logic instead of a plain
+# sum: dedupe by pole, drop zero-qty rows, exclude poles already counted
+# under a CV7 erect/recover item, then COUNT distinct poles (not sum qty).
+POLE_DEDUPE_CATEGORIES = {"CV8", "CV31"}
+ 
 HV_POLE_KEY = "Recover 'A' / 'H' pole, up to and including 15 metres in height, and reinstate, all ground conditions"
 HV_POLE_MULTIPLIER = 2
  
 # ============================================================
-# HELPERS (same normalization logic as your export script)
+# HELPERS (aligned with the export script's normalization)
 # ============================================================
 def normalize_item(x):
     if pd.isna(x):
         return ""
-    s = str(x).replace("\u200b", "").replace("\xa0", "").strip().upper()
+    s = str(x).replace("\u200b", "").replace("\u200e", "").replace("\u200f", "").replace("\xa0", "").strip().upper()
     return re.sub(r"\s+", " ", s)
+ 
+ 
+def normalize_pole(p):
+    """Mirrors the export tool's normalize_pole(): strips zero-width/
+    directional/nbsp characters, uppercases, and removes ALL whitespace
+    (not just collapsing it) so pole IDs compare exactly like the exporter."""
+    if pd.isna(p):
+        return ""
+    s = str(p).replace("\u200b", "").replace("\u200e", "").replace("\u200f", "").replace("\xa0", "").strip().upper()
+    return re.sub(r"\s+", "", s)
  
  
 def clean_job(value):
@@ -232,10 +314,15 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
  
     df["_item_norm"] = df[item_col].apply(normalize_item)
  
-    # HV pole recovery counts double
+    # Raw (un-adjusted) quantity - mirrors what process_cv() reads directly
+    # from "qsub" in the export tool, before any HV-multiplier adjustment.
+    df["_qsub_raw"] = pd.to_numeric(df[qsub_col], errors="coerce").fillna(0)
+ 
+    # HV pole recovery counts double (applied like the export tool's
+    # df.loc[hv_pole_mask, col] *= HV_POLE_MULTIPLIER)
     hv_key_norm = normalize_item(HV_POLE_KEY)
     hv_mask = df["_item_norm"] == hv_key_norm
-    df["_qsub_adj"] = pd.to_numeric(df[qsub_col], errors="coerce").fillna(0)
+    df["_qsub_adj"] = df["_qsub_raw"]
     df.loc[hv_mask, "_qsub_adj"] *= HV_POLE_MULTIPLIER
  
     # map every item to its category
@@ -244,6 +331,13 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
         for desc, label in mapping.items():
             item_to_cat[normalize_item(desc)] = label
     df["_mapped_category"] = df["_item_norm"].map(item_to_cat)
+ 
+    # normalized pole/enid, needed for CV8/CV31 pole-dedupe logic
+    pole_col = cols.get("pole_col")
+    if pole_col and pole_col in df.columns:
+        df["_pole_norm"] = df[pole_col].apply(normalize_pole)
+    else:
+        df["_pole_norm"] = ""
  
     # cleaned job column
     job_col = cols.get("job_col")
@@ -257,6 +351,30 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     df["_date"] = pd.to_datetime(df[date_col], errors="coerce") if date_col and date_col in df.columns else pd.NaT
  
     return df
+ 
+ 
+def cv7_dedupe_poles(frame: pd.DataFrame) -> set:
+    """Poles already covered by a CV7 erect/recover item - mirrors the
+    export tool's cv7_poles = cv7_set(df, CV7_erect) | cv7_set(df, CV7_erect_H)
+    | cv7_set(df, CV7_erect_lv) | cv7_set(df, CV7_recover)."""
+    keys = set()
+    for mapping in POLE_CATEGORIES.values():
+        keys |= {normalize_item(k) for k in mapping}
+    poles = set(frame.loc[frame["_item_norm"].isin(keys), "_pole_norm"].dropna())
+    poles.discard("")
+    return poles
+ 
+ 
+def cv_pole_resume(frame: pd.DataFrame, mapping: dict, cv7_poles: set) -> pd.DataFrame:
+    """Mirrors the export tool's process_cv(): filter by item, drop
+    zero-qty rows, dedupe by pole (keep first), exclude poles already
+    counted under CV7. The resulting row count == the exporter's metric."""
+    keys = {normalize_item(k) for k in mapping}
+    sub = frame[frame["_item_norm"].isin(keys)].copy()
+    sub = sub[sub["_qsub_raw"] != 0]
+    sub = sub.drop_duplicates(subset="_pole_norm")
+    sub = sub[~sub["_pole_norm"].isin(cv7_poles)]
+    return sub
  
  
 # ============================================================
@@ -291,9 +409,7 @@ with st.expander("Detected columns in your file (click to view)"):
  
  
 def guess(*candidates):
-    """Returns the first candidate that exists as a real column, or None if none match.
-    (Previously this fell back to the file's first column, which silently mismapped
-    fields when nothing matched - that's what broke the mapping/filters.)"""
+    """Returns the first candidate that exists as a real column, or None if none match."""
     for c in candidates:
         if c in raw_df.columns:
             return c
@@ -331,6 +447,9 @@ missing_required = [k for k in ["item_col", "qsub_col", "district_col", "circuit
 if missing_required:
     st.error(f"These required fields still need a column picked in the sidebar 'Column mapping' section: {missing_required}")
     st.stop()
+ 
+if cols.get("pole_col") is None:
+    st.sidebar.warning("No Pole/enid column selected - CV8 and CV31 counts can't be deduplicated by pole and will be shown as raw row counts, which may not match the export tool.")
  
 df = process_data(raw_df, cols)
  
@@ -440,13 +559,24 @@ with tab_jobs:
 # ---- Mapped items tab: card grid ----
 with tab_items:
     st.subheader("Mapped items")
+ 
+    cv7_poles = cv7_dedupe_poles(f)
+ 
     card_data = []
     for cat_name, mapping in ALL_CATEGORIES.items():
-        keys = {normalize_item(k) for k in mapping}
-        sub = f[f["_item_norm"].isin(keys)]
-        if sub.empty:
-            continue
-        card_data.append((cat_name, sub["_qsub_adj"].sum(), sub))
+        if cat_name in POLE_DEDUPE_CATEGORIES:
+            # CV8 / CV31: count distinct poles, excluding poles already
+            # covered by a CV7 erect/recover item - matches process_cv().
+            sub = cv_pole_resume(f, mapping, cv7_poles)
+            if sub.empty:
+                continue
+            card_data.append((cat_name, len(sub), sub))
+        else:
+            keys = {normalize_item(k) for k in mapping}
+            sub = f[f["_item_norm"].isin(keys)]
+            if sub.empty:
+                continue
+            card_data.append((cat_name, sub["_qsub_adj"].sum(), sub))
  
     if not card_data:
         st.caption("No mapped items for the current filters.")
@@ -458,6 +588,8 @@ with tab_items:
             for slot, (cat_name, total_qty, _sub) in zip(row_cols, row):
                 if cat_name in UNIT_CONFIG:
                     slot.metric(cat_name, format_length(total_qty, UNIT_CONFIG[cat_name]))
+                elif cat_name in POLE_DEDUPE_CATEGORIES:
+                    slot.metric(cat_name, f"{total_qty:,.0f} poles")
                 else:
                     slot.metric(cat_name, f"{total_qty:,.0f}")
  
