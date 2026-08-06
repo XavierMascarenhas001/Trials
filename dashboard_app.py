@@ -1,3 +1,4 @@
+import os
 import re
 import difflib
 from datetime import datetime
@@ -224,6 +225,36 @@ ALL_CATEGORIES = {
 # under a CV7 erect/recover item, then COUNT distinct poles (not sum qty).
 POLE_DEDUPE_CATEGORIES = {"CV8", "CV31"}
  
+# ============================================================
+# IMAGE GROUPS for the Mapped Items tab
+# Images live in an "Images" folder alongside this script (same repo path).
+# Any category not listed in a group falls through to the "Other items"
+# section at the end, in its normal ALL_CATEGORIES order.
+# ============================================================
+IMAGE_DIR = "Images"
+CARD_GROUPS = [
+    {
+        "title": "Poles",
+        "image": os.path.join(IMAGE_DIR, "poles.png"),
+        "categories": ["CV7_recover", "CV7_erect", "CV7_erect_H", "CV7_erect_lv"],
+    },
+    {
+        "title": "Transformers",
+        "image": os.path.join(IMAGE_DIR, "Transformer.png"),
+        "categories": ["CV7_Tx", "transformer"],
+    },
+    {
+        "title": "Cable",
+        "image": os.path.join(IMAGE_DIR, "Cable.png"),
+        "categories": [
+            "CV7_OHL_CONDUCTOR_instal",
+            "CV7_OHL_CONDUCTOR_recover",
+            "CV7_OHL_CONDUCTOR_LV_instal",
+            "CV7_OHL_CONDUCTOR_LV_recover",
+        ],
+    },
+]
+ 
 HV_POLE_KEY = "Recover 'A' / 'H' pole, up to and including 15 metres in height, and reinstate, all ground conditions"
 HV_POLE_MULTIPLIER = 2
  
@@ -375,6 +406,31 @@ def cv_pole_resume(frame: pd.DataFrame, mapping: dict, cv7_poles: set) -> pd.Dat
     sub = sub.drop_duplicates(subset="_pole_norm")
     sub = sub[~sub["_pole_norm"].isin(cv7_poles)]
     return sub
+ 
+ 
+def build_card(frame: pd.DataFrame, cat_name: str, mapping: dict, cv7_poles: set):
+    """Returns (cat_name, total_qty, sub) for a single category, or None
+    if there are no matching rows under the current filters."""
+    if cat_name in POLE_DEDUPE_CATEGORIES:
+        sub = cv_pole_resume(frame, mapping, cv7_poles)
+        if sub.empty:
+            return None
+        return (cat_name, len(sub), sub)
+    else:
+        keys = {normalize_item(k) for k in mapping}
+        sub = frame[frame["_item_norm"].isin(keys)]
+        if sub.empty:
+            return None
+        return (cat_name, sub["_qsub_adj"].sum(), sub)
+ 
+ 
+def render_metric(slot, cat_name: str, total_qty):
+    if cat_name in UNIT_CONFIG:
+        slot.metric(cat_name, format_length(total_qty, UNIT_CONFIG[cat_name]))
+    elif cat_name in POLE_DEDUPE_CATEGORIES:
+        slot.metric(cat_name, f"{total_qty:,.0f} poles")
+    else:
+        slot.metric(cat_name, f"{total_qty:,.0f}")
  
  
 # ============================================================
@@ -556,46 +612,64 @@ with tab_jobs:
     else:
         st.caption("No job column selected in the sidebar mapping.")
  
-# ---- Mapped items tab: card grid ----
+# ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
     st.subheader("Mapped items")
  
     cv7_poles = cv7_dedupe_poles(f)
+    all_card_data = []  # accumulated in display order, feeds the detail selectbox below
+    grouped_cat_names = {c for group in CARD_GROUPS for c in group["categories"]}
  
-    card_data = []
-    for cat_name, mapping in ALL_CATEGORIES.items():
-        if cat_name in POLE_DEDUPE_CATEGORIES:
-            # CV8 / CV31: count distinct poles, excluding poles already
-            # covered by a CV7 erect/recover item - matches process_cv().
-            sub = cv_pole_resume(f, mapping, cv7_poles)
-            if sub.empty:
-                continue
-            card_data.append((cat_name, len(sub), sub))
+    for group in CARD_GROUPS:
+        if os.path.exists(group["image"]):
+            st.image(group["image"], width=160)
         else:
-            keys = {normalize_item(k) for k in mapping}
-            sub = f[f["_item_norm"].isin(keys)]
-            if sub.empty:
-                continue
-            card_data.append((cat_name, sub["_qsub_adj"].sum(), sub))
+            st.caption(f"⚠️ Image not found: {group['image']}")
+        st.markdown(f"**{group['title']}**")
  
-    if not card_data:
-        st.caption("No mapped items for the current filters.")
-    else:
+        group_cards = []
+        for cat_name in group["categories"]:
+            mapping = ALL_CATEGORIES.get(cat_name)
+            if mapping is None:
+                continue
+            card = build_card(f, cat_name, mapping, cv7_poles)
+            if card:
+                group_cards.append(card)
+                all_card_data.append(card)
+ 
+        if group_cards:
+            row_cols = st.columns(len(group_cards))
+            for slot, (cat_name, total_qty, _sub) in zip(row_cols, group_cards):
+                render_metric(slot, cat_name, total_qty)
+        else:
+            st.caption("No records for this group under the current filters.")
+ 
+        st.divider()
+ 
+    # Everything not already shown in an image group, same grid as before
+    remaining_cat_names = [c for c in ALL_CATEGORIES if c not in grouped_cat_names]
+    remaining_cards = []
+    for cat_name in remaining_cat_names:
+        card = build_card(f, cat_name, ALL_CATEGORIES[cat_name], cv7_poles)
+        if card:
+            remaining_cards.append(card)
+            all_card_data.append(card)
+ 
+    if remaining_cards:
+        st.markdown("**Other items**")
         n_cols = 4
-        rows = [card_data[i:i + n_cols] for i in range(0, len(card_data), n_cols)]
+        rows = [remaining_cards[i:i + n_cols] for i in range(0, len(remaining_cards), n_cols)]
         for row in rows:
             row_cols = st.columns(n_cols)
             for slot, (cat_name, total_qty, _sub) in zip(row_cols, row):
-                if cat_name in UNIT_CONFIG:
-                    slot.metric(cat_name, format_length(total_qty, UNIT_CONFIG[cat_name]))
-                elif cat_name in POLE_DEDUPE_CATEGORIES:
-                    slot.metric(cat_name, f"{total_qty:,.0f} poles")
-                else:
-                    slot.metric(cat_name, f"{total_qty:,.0f}")
+                render_metric(slot, cat_name, total_qty)
  
+    if not all_card_data:
+        st.caption("No mapped items for the current filters.")
+    else:
         st.divider()
-        chosen = st.selectbox("View details for", [c[0] for c in card_data])
-        _, _, sub = next(c for c in card_data if c[0] == chosen)
+        chosen = st.selectbox("View details for", [c[0] for c in all_card_data])
+        _, _, sub = next(c for c in all_card_data if c[0] == chosen)
         detail = pd.DataFrame({
             "District": sub[district_col],
             "Job": sub["_job_clean"],
