@@ -235,7 +235,7 @@ IMAGE_DIR = "Images"
 CARD_GROUPS = [
     {
         "title": "Poles",
-        "image": os.path.join(IMAGE_DIR, "poles.png"),
+        "image": os.path.join(IMAGE_DIR, "Poles.png"),
         "categories": ["CV7_recover", "CV7_erect", "CV7_erect_H", "CV7_erect_lv"],
     },
     {
@@ -621,11 +621,13 @@ with tab_items:
     grouped_cat_names = {c for group in CARD_GROUPS for c in group["categories"]}
  
     for group in CARD_GROUPS:
-        if os.path.exists(group["image"]):
-            st.image(group["image"], width=160)
-        else:
-            st.caption(f"⚠️ Image not found: {group['image']}")
-        st.markdown(f"**{group['title']}**")
+        img_l, img_c, img_r = st.columns([1, 1, 1])
+        with img_c:
+            if os.path.exists(group["image"]):
+                st.image(group["image"], width=240)
+            else:
+                st.caption(f"⚠️ Image not found: {group['image']}")
+            st.markdown(f"<p style='text-align:center; font-weight:600;'>{group['title']}</p>", unsafe_allow_html=True)
  
         group_cards = []
         for cat_name in group["categories"]:
