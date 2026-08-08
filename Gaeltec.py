@@ -19,25 +19,32 @@ st.set_page_config(page_title="Network Job Tracker", layout="wide")
 # workbook is uploaded via a file_uploader instead of read from disk.
  
  
-@st.cache_data(show_spinner="Reading outage programme...")
-def load_outage_programme(file_bytes: bytes) -> pd.DataFrame:
+@st.cache_data(show_spinner="Reading outage programme...", max_entries=3)
+def load_outage_programme(file_bytes: bytes):
     """Cached on the uploaded file's bytes - re-parses only when a
     different file (or a changed version of the same file) is uploaded,
-    not on every rerun/widget interaction."""
-    df = pd.read_excel(
-        io.BytesIO(file_bytes),
-        sheet_name="2026",
-        header=6,                     # Excel row 7 is the header row (0-indexed = 6)
-        usecols="A,B,C,E,F,G,L,M,N",  # District, Outage Date, Weekday, Scheme, Outage #, Circuit, PID, SPEN PM, POI
-        engine="openpyxl",
-    )
-    df.columns = [
-        "District", "Outage Date", "Weekday", "Scheme",
-        "Outage #", "Circuit", "PID", "SPEN PM", "POI",
-    ]
-    df = df.dropna(how="all")
-    df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
-    return df
+    not on every rerun/widget interaction.
+ 
+    Returns (df, error_message). Never raises - if the uploaded workbook
+    doesn't have a '2026' sheet in the expected layout, this should show a
+    clean st.error rather than crash the whole app."""
+    try:
+        df = pd.read_excel(
+            io.BytesIO(file_bytes),
+            sheet_name="2026",
+            header=6,                     # Excel row 7 is the header row (0-indexed = 6)
+            usecols="A,B,C,E,F,G,L,M,N",  # District, Outage Date, Weekday, Scheme, Outage #, Circuit, PID, SPEN PM, POI
+            engine="openpyxl",
+        )
+        df.columns = [
+            "District", "Outage Date", "Weekday", "Scheme",
+            "Outage #", "Circuit", "PID", "SPEN PM", "POI",
+        ]
+        df = df.dropna(how="all")
+        df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
+        return df, None
+    except Exception as e:
+        return None, str(e)
  
  
 # ============================================================
@@ -397,17 +404,22 @@ def show_total_banner(label, value_str):
     )
  
  
-@st.cache_data
-def read_file(file) -> pd.DataFrame:
-    if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
-    else:
-        df = pd.read_parquet(file)
-    df.columns = df.columns.str.strip().str.lower()
-    return df
+@st.cache_data(max_entries=3)
+def read_file(file):
+    """Returns (df, error_message). Never raises - a malformed upload
+    should show a clean st.error, not crash the whole app."""
+    try:
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_parquet(file)
+        df.columns = df.columns.str.strip().str.lower()
+        return df, None
+    except Exception as e:
+        return None, str(e)
  
  
-@st.cache_data(show_spinner="Processing data...")
+@st.cache_data(show_spinner="Processing data...", max_entries=3)
 def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     """cols: the resolved {logical_name: real_column_name} mapping picked in the sidebar.
  
@@ -546,7 +558,10 @@ if not uploaded:
     st.info("Upload the parquet/CSV file your export script normally reads, then filters and charts appear below.")
     st.stop()
  
-raw_df = read_file(uploaded)
+raw_df, read_err = read_file(uploaded)
+if read_err:
+    st.error(f"Couldn't read that file - it may be corrupted or not a valid CSV/parquet file.\n\n**Details:** {read_err}")
+    st.stop()
  
 with st.expander("Detected columns in your file (click to view)"):
     st.write(list(raw_df.columns))
@@ -710,7 +725,13 @@ with tab_jobs:
         st.info("Upload the outages programme workbook (sheet '2026', header on row 7) to see it here.")
         outage_df = None
     else:
-        outage_df = load_outage_programme(outage_upload.getvalue())
+        outage_df, outage_err = load_outage_programme(outage_upload.getvalue())
+        if outage_err:
+            st.error(
+                f"Couldn't read that workbook - check it has a sheet named '2026' with headers on row 7.\n\n"
+                f"**Details:** {outage_err}"
+            )
+            outage_df = None
  
     if outage_df is not None:
         st.caption(f"{len(outage_df):,} rows from High-level_planning_2026.xlsx (sheet '2026')")
@@ -905,16 +926,24 @@ with tab_items:
         st.dataframe(detail, height=320, use_container_width=True, hide_index=True)
  
 # ---- Poles Forecast tab ----
-@st.cache_data(show_spinner="Reading poles forecast workbook...")
+@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
 def list_forecast_sheets(file_bytes: bytes):
-    return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
+    """Returns (sheet_names, error_message)."""
+    try:
+        return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names, None
+    except Exception as e:
+        return [], str(e)
  
  
-@st.cache_data(show_spinner="Reading poles forecast workbook...")
-def load_forecast_workbook(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
-    fdf = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
-    fdf.columns = fdf.columns.astype(str).str.strip()
-    return fdf
+@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
+def load_forecast_workbook(file_bytes: bytes, sheet_name: str):
+    """Returns (df, error_message)."""
+    try:
+        fdf = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+        fdf.columns = fdf.columns.astype(str).str.strip()
+        return fdf, None
+    except Exception as e:
+        return None, str(e)
  
  
 with tab_forecast:
@@ -933,136 +962,149 @@ with tab_forecast:
         )
     else:
         f_bytes = forecast_upload.getvalue()
-        sheet_names = list_forecast_sheets(f_bytes)
-        sheet_choice = (
-            st.selectbox("Sheet", sheet_names, key="forecast_sheet")
-            if len(sheet_names) > 1 else sheet_names[0]
-        )
-        fdf = load_forecast_workbook(f_bytes, sheet_choice)
+        sheet_names, sheet_err = list_forecast_sheets(f_bytes)
+        if sheet_err:
+            st.error(f"Couldn't open that workbook.\n\n**Details:** {sheet_err}")
+            sheet_names = []
  
-        with st.expander("Detected columns (click to view)"):
-            st.write(list(fdf.columns))
- 
-        def fguess(*candidates):
-            lower_map = {c.lower(): c for c in fdf.columns}
-            for cand in candidates:
-                if cand.lower() in lower_map:
-                    return lower_map[cand.lower()]
-            return None
- 
-        fcol_options = ["(none)"] + list(fdf.columns)
- 
-        with st.expander("⚙️ Column mapping", expanded=False):
-            def fpick(label, default_col, key):
-                idx = fcol_options.index(default_col) if default_col in fcol_options else 0
-                if default_col is None:
-                    st.warning(f"Couldn't guess a column for **{label}** - pick one.")
-                val = st.selectbox(label, fcol_options, index=idx, key=key)
-                return None if val == "(none)" else val
- 
-            f_cols = {
-                "district": fpick("District", fguess("District"), "fc_district"),
-                "pid": fpick("Project ID", fguess("Project ID", "PID"), "fc_pid"),
-                "project": fpick("Project", fguess("Project", "Project Name"), "fc_project"),
-                "circuit": fpick("Circuit", fguess("Circuit"), "fc_circuit"),
-                "voltage": fpick("Voltage", fguess("Voltage"), "fc_voltage"),
-                "forecast": fpick(
-                    "Forecasted Total poles",
-                    fguess("Forecasted Total poles", "Forecasted Total Poles", "Forecast Total Poles"),
-                    "fc_forecast",
-                ),
-                "disposed": fpick("Poles Disposed", fguess("Poles Disposed", "Poles disposed"), "fc_disposed"),
-                "start_date": fpick("Start Date", fguess("Start Date", "StartDate", "Start"), "fc_start_date"),
-            }
- 
-        required = ["project", "circuit", "pid", "forecast", "disposed"]
-        missing = [k for k in required if f_cols[k] is None]
-        if missing:
-            st.error(f"Please map these columns in 'Column mapping' above: {missing}")
+        if not sheet_names:
+            pass  # error already shown above - nothing more to render in this tab
         else:
-            plot_df = pd.DataFrame({
-                "District": fdf[f_cols["district"]] if f_cols["district"] else "",
-                "PID": fdf[f_cols["pid"]],
-                "Project": fdf[f_cols["project"]],
-                "Circuit": fdf[f_cols["circuit"]],
-                "Voltage": fdf[f_cols["voltage"]] if f_cols["voltage"] else "",
-                "Forecast": pd.to_numeric(fdf[f_cols["forecast"]], errors="coerce").fillna(0),
-                "Disposed": pd.to_numeric(fdf[f_cols["disposed"]], errors="coerce").fillna(0),
-            })
-            if f_cols["start_date"]:
-                plot_df["Start Date"] = pd.to_datetime(fdf[f_cols["start_date"]], errors="coerce")
-                plot_df["Year"] = plot_df["Start Date"].dt.year
-            plot_df = plot_df.dropna(subset=["Project"])
-            # clamp so a data-entry error (disposed > forecasted) never draws past the bar
-            plot_df["Disposed"] = plot_df[["Disposed", "Forecast"]].min(axis=1)
-            plot_df["Remaining"] = (plot_df["Forecast"] - plot_df["Disposed"]).clip(lower=0)
-            plot_df["Label"] = (
-                plot_df["Project"].astype(str) + " — "
-                + plot_df["Circuit"].astype(str) + " — PID "
-                + plot_df["PID"].astype(str)
+            sheet_choice = (
+                st.selectbox("Sheet", sheet_names, key="forecast_sheet")
+                if len(sheet_names) > 1 else sheet_names[0]
             )
+            fdf, fdf_err = load_forecast_workbook(f_bytes, sheet_choice)
+            if fdf_err:
+                st.error(f"Couldn't read sheet '{sheet_choice}'.\n\n**Details:** {fdf_err}")
+                fdf = None
  
-            fc1, fc2, fc3 = st.columns(3)
-            with fc1:
-                forecast_districts = (
-                    st.multiselect("District", sorted(plot_df["District"].dropna().unique()), key="forecast_district")
-                    if f_cols["district"] else []
-                )
-            with fc2:
-                forecast_voltages = (
-                    st.multiselect("Voltage", sorted(plot_df["Voltage"].dropna().unique()), key="forecast_voltage")
-                    if f_cols["voltage"] else []
-                )
-            with fc3:
-                forecast_years = (
-                    st.multiselect(
-                        "Start year",
-                        sorted(plot_df["Year"].dropna().unique().astype(int)),
-                        key="forecast_year",
-                    )
-                    if "Year" in plot_df.columns else []
-                )
- 
-            if forecast_districts:
-                plot_df = plot_df[plot_df["District"].isin(forecast_districts)]
-            if forecast_voltages:
-                plot_df = plot_df[plot_df["Voltage"].isin(forecast_voltages)]
-            if forecast_years:
-                plot_df = plot_df[plot_df["Year"].isin(forecast_years)]
- 
-            total_forecast = plot_df["Forecast"].sum()
-            total_disposed = plot_df["Disposed"].sum()
-            show_total_banner(
-                "Poles disposed vs forecasted",
-                f"{total_disposed:,.0f} / {total_forecast:,.0f}"
-                + (f"  ({total_disposed / total_forecast:.0%})" if total_forecast else ""),
-            )
- 
-            if plot_df.empty:
-                st.caption("No rows to chart for the current filters.")
+            if fdf is None:
+                pass  # error already shown above
             else:
-                plot_df = plot_df.sort_values("Forecast", ascending=True)
+                with st.expander("Detected columns (click to view)"):
+                    st.write(list(fdf.columns))
  
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    y=plot_df["Label"], x=plot_df["Disposed"], orientation="h",
-                    name="Disposed", marker_color="#16a34a",
-                    hovertemplate="%{y}<br>Disposed: %{x:,.0f}<extra></extra>",
-                ))
-                fig.add_trace(go.Bar(
-                    y=plot_df["Label"], x=plot_df["Remaining"], orientation="h",
-                    name="Remaining", marker_color="#dc2626",
-                    hovertemplate="%{y}<br>Remaining: %{x:,.0f}<extra></extra>",
-                ))
-                fig.update_layout(
-                    barmode="stack",
-                    height=max(420, 34 * len(plot_df)),
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    xaxis_title="Poles",
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                st.caption(f"{len(plot_df):,} project/circuit rows shown")
+                def fguess(*candidates):
+                    lower_map = {c.lower(): c for c in fdf.columns}
+                    for cand in candidates:
+                        if cand.lower() in lower_map:
+                            return lower_map[cand.lower()]
+                    return None
+ 
+                fcol_options = ["(none)"] + list(fdf.columns)
+ 
+                with st.expander("⚙️ Column mapping", expanded=False):
+                    def fpick(label, default_col, key):
+                        idx = fcol_options.index(default_col) if default_col in fcol_options else 0
+                        if default_col is None:
+                            st.warning(f"Couldn't guess a column for **{label}** - pick one.")
+                        val = st.selectbox(label, fcol_options, index=idx, key=key)
+                        return None if val == "(none)" else val
+ 
+                    f_cols = {
+                        "district": fpick("District", fguess("District"), "fc_district"),
+                        "pid": fpick("Project ID", fguess("Project ID", "PID"), "fc_pid"),
+                        "project": fpick("Project", fguess("Project", "Project Name"), "fc_project"),
+                        "circuit": fpick("Circuit", fguess("Circuit"), "fc_circuit"),
+                        "voltage": fpick("Voltage", fguess("Voltage"), "fc_voltage"),
+                        "forecast": fpick(
+                            "Forecasted Total poles",
+                            fguess("Forecasted Total poles", "Forecasted Total Poles", "Forecast Total Poles"),
+                            "fc_forecast",
+                        ),
+                        "disposed": fpick("Poles Disposed", fguess("Poles Disposed", "Poles disposed"), "fc_disposed"),
+                        "start_date": fpick("Start Date", fguess("Start Date", "StartDate", "Start"), "fc_start_date"),
+                    }
+ 
+                required = ["project", "circuit", "pid", "forecast", "disposed"]
+                missing = [k for k in required if f_cols[k] is None]
+                if missing:
+                    st.error(f"Please map these columns in 'Column mapping' above: {missing}")
+                else:
+                    plot_df = pd.DataFrame({
+                        "District": fdf[f_cols["district"]] if f_cols["district"] else "",
+                        "PID": fdf[f_cols["pid"]],
+                        "Project": fdf[f_cols["project"]],
+                        "Circuit": fdf[f_cols["circuit"]],
+                        "Voltage": fdf[f_cols["voltage"]] if f_cols["voltage"] else "",
+                        "Forecast": pd.to_numeric(fdf[f_cols["forecast"]], errors="coerce").fillna(0),
+                        "Disposed": pd.to_numeric(fdf[f_cols["disposed"]], errors="coerce").fillna(0),
+                    })
+                    if f_cols["start_date"]:
+                        plot_df["Start Date"] = pd.to_datetime(fdf[f_cols["start_date"]], errors="coerce")
+                        plot_df["Year"] = plot_df["Start Date"].dt.year
+                    plot_df = plot_df.dropna(subset=["Project"])
+                    # clamp so a data-entry error (disposed > forecasted) never draws past the bar
+                    plot_df["Disposed"] = plot_df[["Disposed", "Forecast"]].min(axis=1)
+                    plot_df["Remaining"] = (plot_df["Forecast"] - plot_df["Disposed"]).clip(lower=0)
+                    plot_df["Label"] = (
+                        plot_df["Project"].astype(str) + " — "
+                        + plot_df["Circuit"].astype(str) + " — PID "
+                        + plot_df["PID"].astype(str)
+                    )
+ 
+                    fc1, fc2, fc3 = st.columns(3)
+                    with fc1:
+                        forecast_districts = (
+                            st.multiselect("District", sorted(plot_df["District"].dropna().unique()), key="forecast_district")
+                            if f_cols["district"] else []
+                        )
+                    with fc2:
+                        forecast_voltages = (
+                            st.multiselect("Voltage", sorted(plot_df["Voltage"].dropna().unique()), key="forecast_voltage")
+                            if f_cols["voltage"] else []
+                        )
+                    with fc3:
+                        forecast_years = (
+                            st.multiselect(
+                                "Start year",
+                                sorted(plot_df["Year"].dropna().unique().astype(int)),
+                                key="forecast_year",
+                            )
+                            if "Year" in plot_df.columns else []
+                        )
+ 
+                    if forecast_districts:
+                        plot_df = plot_df[plot_df["District"].isin(forecast_districts)]
+                    if forecast_voltages:
+                        plot_df = plot_df[plot_df["Voltage"].isin(forecast_voltages)]
+                    if forecast_years:
+                        plot_df = plot_df[plot_df["Year"].isin(forecast_years)]
+ 
+                    total_forecast = plot_df["Forecast"].sum()
+                    total_disposed = plot_df["Disposed"].sum()
+                    show_total_banner(
+                        "Poles disposed vs forecasted",
+                        f"{total_disposed:,.0f} / {total_forecast:,.0f}"
+                        + (f"  ({total_disposed / total_forecast:.0%})" if total_forecast else ""),
+                    )
+ 
+                    if plot_df.empty:
+                        st.caption("No rows to chart for the current filters.")
+                    else:
+                        plot_df = plot_df.sort_values("Forecast", ascending=True)
+ 
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(
+                            y=plot_df["Label"], x=plot_df["Disposed"], orientation="h",
+                            name="Disposed", marker_color="#16a34a",
+                            hovertemplate="%{y}<br>Disposed: %{x:,.0f}<extra></extra>",
+                        ))
+                        fig.add_trace(go.Bar(
+                            y=plot_df["Label"], x=plot_df["Remaining"], orientation="h",
+                            name="Remaining", marker_color="#dc2626",
+                            hovertemplate="%{y}<br>Remaining: %{x:,.0f}<extra></extra>",
+                        ))
+                        fig.update_layout(
+                            barmode="stack",
+                            height=max(420, 34 * len(plot_df)),
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            xaxis_title="Poles",
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.caption(f"{len(plot_df):,} project/circuit rows shown")
  
  
 with tab_totals:
