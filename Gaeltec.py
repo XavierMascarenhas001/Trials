@@ -1,112 +1,14 @@
-Claude finished the response
-
-In my tab jobs I want to read information from one excel.
-"\\gaeltec-gl\Gaeltec_Network\62.OHLT.UK\03.SPEN\21.Planning\1 - Outages Programme\High-level_planning_2026.xlsx"
-
-I want the columns District Outage Date Weekday, Shceme, Outage #, Circuit, PID, SPEN PM, POI.
-
-Should we convert the document to parquet and download into the Dashboard for reading or can we read directly from the dashboard to the path? I want efficiency, dont want the file to be to slow
-Weighed direct network reading versus parquet conversion for optimal performance
-
-Direct read is the better call here — you don't need a parquet conversion step for this file.
-
-Why not convert to parquet:
-
-    Converting still requires reading the xlsx at least once, so you're not avoiding the "slow" part — you're just moving it to a separate script.
-    You'd now need a scheduler/cron job to keep the parquet copy in sync whenever the planning workbook changes, which is more moving parts to maintain for a file that's presumably updated fairly often (it's a live planning tracker).
-    Your existing read_file already handles parquet for the main upload — mixing a second, auto-refreshed parquet pipeline into the same app adds complexity without a real payoff at this file size.
-
-Why direct read is fine — with one important caveat:
-The actual slowness with Excel comes from two things: (1) openpyxl parsing the whole workbook including all 8 sheets and formatting, and (2) Streamlit re-running your whole script on every widget interaction, which would re-hit the network share every time if you don't cache it properly.
-
-Fix both by:
-
-    Reading only the one sheet (2026) and only the columns you need, skipping the header junk rows.
-    Caching on the file's last-modified time, not just st.cache_data alone — so it re-reads only when the source file actually changes, not on every click.
-
-python
-
-OUTAGE_PATH = r"\\gaeltec-gl\Gaeltec_Network\62.OHLT.UK\03.SPEN\21.Planning\1 - Outages Programme\High-level_planning_2026.xlsx"
-
-@st.cache_data(show_spinner="Loading outage programme...")
-def load_outage_programme(path: str, mtime: float) -> pd.DataFrame:
-    # mtime is only here to bust the cache when the source file changes
-    df = pd.read_excel(
-        path,
-        sheet_name="2026",
-        header=6,                     # row 7 in Excel is the real header row
-        usecols="A,B,C,E,F,G,L,M,N",  # District, Outage Date, Weekday, Scheme, Outage #, Circuit, PID, SPEN PM, POI
-        engine="openpyxl",
-    )
-    df.columns = [
-        "District", "Outage Date", "Weekday", "Scheme",
-        "Outage #", "Circuit", "PID", "SPEN PM", "POI",
-    ]
-    df = df.dropna(how="all")
-    return df
-
-def get_outage_programme(path: str) -> pd.DataFrame | None:
-    if not os.path.exists(path):
-        st.sidebar.warning(f"Can't reach outage programme file:\n{path}")
-        return None
-    mtime = os.path.getmtime(path)
-    return load_outage_programme(path, mtime)
-
-Then in the Jobs tab:
-python
-
-with tab_jobs:
-    st.subheader("Jobs (District → Job → Circuit → PID)")
-    ...  # your existing job_table code
-
-    st.divider()
-    st.subheader("Outages Programme 2026")
-    outage_df = get_outage_programme(OUTAGE_PATH)
-    if outage_df is not None:
-        st.caption(f"{len(outage_df):,} rows from High-level_planning_2026.xlsx")
-        st.dataframe(outage_df, height=420, use_container_width=True, hide_index=True)
-
-Two things to check before this works in practice:
-
-    The machine running Streamlit must be able to reach that UNC path the same way your own PC does (same domain/VPN, and the account running Streamlit needs read access to the share). If you ever deploy this off the local network (e.g. Streamlit Cloud), direct UNC access won't be possible at all — that's the one scenario where you'd have to fall back to a synced local copy or parquet snapshot.
-    If several people load the dashboard at once, st.cache_data is shared across sessions by default, so the network file only actually gets hit once per change, not once per user — which is the main efficiency win here.
-
-If this workbook later grows to tens of thousands of rows or gets read very frequently by many users, revisit parquet then — but at the size shown in your upload, direct + mtime-cached read will be plenty fast.
-
-Also the excel information is in a sheet named 2026 and the header is in row 7
-
-Good — that matches what I used. In pandas, header is zero-indexed, so Excel row 7 corresponds to header=6 in read_excel, which is exactly what the snippet already has:
-python
-
-df = pd.read_excel(
-    path,
-    sheet_name="2026",
-    header=6,   # Excel row 7 → 0-indexed row 6
-    usecols="A,B,C,E,F,G,L,M,N",
-    engine="openpyxl",
-)
-
-So no change needed there — the code I gave you should line up correctly with your sheet. If you want, paste in a couple of sample rows from the actual "2026" sheet (or re-confirm the exact column letters for District/Outage Date/Weekday/Scheme/Outage #/Circuit/PID/SPEN PM/POI) and I'll double check the usecols mapping matches exactly, since a shifted column would silently pull the wrong data rather than error out.
-
-give me full code
-Ran 3 commands, created a file, read a file
-
-Everything else is unchanged from your original app — the only additions are OUTAGE_PATH, load_outage_programme, get_outage_programme near the top, and the new "Outages Programme 2026" block at the end of the Jobs tab (with quick filters for District, SPEN PM, and outage date). It only re-hits the network share when the file's modified time changes, otherwise it serves from Streamlit's cache.
-Network job tracker
-PY 
-Want to be notified when Claude responds?
-
-
-Claude is AI and can make mistakes. Please double-check responses.
-Network job tracker · PY
 import os
 import re
 import difflib
 from datetime import datetime
+from urllib.parse import unquote
  
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import openpyxl
+from streamlit_calendar import calendar as st_calendar
  
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
@@ -116,23 +18,75 @@ st.set_page_config(page_title="Network Job Tracker", layout="wide")
 OUTAGE_PATH = r"\\gaeltec-gl\Gaeltec_Network\62.OHLT.UK\03.SPEN\21.Planning\1 - Outages Programme\High-level_planning_2026.xlsx"
  
  
+def _unc_to_file_uri(path: str) -> str:
+    """Converts a Windows/UNC path to a file:// URI, e.g.
+    \\\\server\\share\\folder -> file://server/share/folder"""
+    p = path.replace("\\", "/")
+    if p.startswith("//"):
+        return "file:" + p           # UNC: file://server/share/...
+    return "file:///" + p.lstrip("/")  # local drive: file:///C:/...
+ 
+ 
 @st.cache_data(show_spinner="Loading outage programme...")
 def load_outage_programme(path: str, mtime: float) -> pd.DataFrame:
     """mtime is only passed in to bust the Streamlit cache when the source
-    file on the network share actually changes - it is not used otherwise."""
-    df = pd.read_excel(
-        path,
-        sheet_name="2026",
-        header=6,                     # Excel row 7 is the real header row (0-indexed = 6)
-        usecols="A,B,C,E,F,G,L,M,N",  # District, Outage Date, Weekday, Scheme, Outage #, Circuit, PID, SPEN PM, POI
-        engine="openpyxl",
-    )
-    df.columns = [
-        "District", "Outage Date", "Weekday", "Scheme",
-        "Outage #", "Circuit", "PID", "SPEN PM", "POI",
-    ]
-    df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
-    df = df.dropna(how="all")
+    file on the network share actually changes - it is not used otherwise.
+ 
+    Uses openpyxl directly (not pandas) because the Outage # column stores
+    a clickable hyperlink to a job folder on the network share, and pandas'
+    read_excel discards hyperlinks - it only sees the displayed cell text.
+    Note: this must NOT use read_only=True - openpyxl's read-only mode does
+    not expose cell.hyperlink at all.
+    """
+    base_dir = os.path.dirname(path)
+ 
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb["2026"]
+ 
+    rows = []
+    # Excel row 7 is the header, so data starts at row 8.
+    # Columns: A District, B Outage Date, C Weekday, E Scheme, F Outage #,
+    # G Circuit, L PID, M SPEN PM, N POI.
+    for row in ws.iter_rows(min_row=8, max_row=ws.max_row, min_col=1, max_col=14):
+        district = row[0].value
+        outage_date = row[1].value
+        weekday = row[2].value
+        scheme = row[4].value
+        outage_cell = row[5]
+        outage_num = outage_cell.value
+        circuit = row[6].value
+        pid = row[11].value
+        spen_pm = row[12].value
+        poi = row[13].value
+ 
+        if district is None and outage_date is None and scheme is None:
+            continue  # skip fully blank rows
+ 
+        link = None
+        hyperlink = outage_cell.hyperlink
+        if hyperlink is not None and hyperlink.target:
+            target = unquote(hyperlink.target)
+            full_path = os.path.normpath(os.path.join(base_dir, target))
+            link = _unc_to_file_uri(full_path)
+ 
+        rows.append({
+            "District": district,
+            "Outage Date": outage_date,
+            "Weekday": weekday,
+            "Scheme": scheme,
+            "Outage #": outage_num,
+            "Circuit": circuit,
+            "PID": pid,
+            "SPEN PM": spen_pm,
+            "POI": poi,
+            "Link": link,
+        })
+ 
+    wb.close()
+ 
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
     return df
  
  
@@ -851,7 +805,79 @@ with tab_jobs:
             outage_f = outage_f[outage_f["Outage Date"].between(o_start, o_end)]
  
         st.caption(f"{len(outage_f):,} rows after outage filters")
-        st.dataframe(outage_f, height=420, use_container_width=True, hide_index=True)
+ 
+        outage_view = st.radio("View", ["Table", "Calendar"], index=1, horizontal=True, key="outage_view")
+ 
+        if outage_view == "Table":
+            st.dataframe(
+                outage_f.drop(columns=["Link"]) if "Link" in outage_f.columns else outage_f,
+                height=420, use_container_width=True, hide_index=True,
+            )
+        else:
+            DISTRICT_COLORS = {}
+            palette = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#be185d", "#4d7c0f"]
+            for i, d in enumerate(sorted(outage_f["District"].dropna().unique())):
+                DISTRICT_COLORS[d] = palette[i % len(palette)]
+ 
+            events = []
+            for _, r in outage_f.dropna(subset=["Outage Date"]).iterrows():
+                title_bits = [str(r["District"]) if pd.notna(r["District"]) else "", str(r["Scheme"]) if pd.notna(r["Scheme"]) else ""]
+                events.append({
+                    "title": " — ".join(b for b in title_bits if b),
+                    "start": r["Outage Date"].strftime("%Y-%m-%d"),
+                    "allDay": True,
+                    "backgroundColor": DISTRICT_COLORS.get(r["District"], "#2563eb"),
+                    "borderColor": DISTRICT_COLORS.get(r["District"], "#2563eb"),
+                    "extendedProps": {
+                        "district": None if pd.isna(r["District"]) else str(r["District"]),
+                        "scheme": None if pd.isna(r["Scheme"]) else str(r["Scheme"]),
+                        "outage_num": None if pd.isna(r["Outage #"]) else str(r["Outage #"]),
+                        "circuit": None if pd.isna(r["Circuit"]) else str(r["Circuit"]),
+                        "pid": None if pd.isna(r["PID"]) else str(r["PID"]),
+                        "spen_pm": None if pd.isna(r["SPEN PM"]) else str(r["SPEN PM"]),
+                        "poi": None if pd.isna(r["POI"]) else str(r["POI"]),
+                        "link": r.get("Link"),
+                    },
+                })
+ 
+            calendar_options = {
+                "initialView": "dayGridMonth",
+                "headerToolbar": {
+                    "left": "prev,next today",
+                    "center": "title",
+                    "right": "dayGridMonth,listMonth",
+                },
+                "height": 720,
+                "firstDay": 1,
+            }
+ 
+            cal_state = st_calendar(
+                events=events,
+                options=calendar_options,
+                custom_css=".fc-event-title{white-space:normal!important;}",
+                key="outage_calendar",
+            )
+ 
+            st.divider()
+            if cal_state and cal_state.get("callback") == "eventClick":
+                clicked = cal_state["eventClick"]["event"]
+                props = clicked.get("extendedProps", {})
+                st.markdown(f"**{clicked.get('title', 'Outage')}**  —  {clicked.get('start', '')}")
+ 
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("Circuit", props.get("circuit") or "—")
+                d2.metric("PID", props.get("pid") or "—")
+                d3.metric("SPEN PM", props.get("spen_pm") or "—")
+                d4.metric("POI", props.get("poi") or "—")
+ 
+                link = props.get("link")
+                if link:
+                    st.markdown(f"[📂 Open outage folder]({link})")
+                    st.caption("Opens as a local/network file link - works when your browser and OS allow file:// links to that network share.")
+                else:
+                    st.caption("No linked folder for this outage.")
+            else:
+                st.caption("Click an outage on the calendar to see its details and folder link here.")
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
@@ -983,5 +1009,3 @@ with tab_totals:
                 .sort_values("Difference (£)", key=abs, ascending=False)
             )
             st.dataframe(by_project, height=280, use_container_width=True, hide_index=True)
- 
-
