@@ -4,4 +4,7 @@ streamlit
 pandas
 plotly
 pyarrow
+openpyxl
+streamlit-calendar
+
 
