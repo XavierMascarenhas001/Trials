@@ -1,6 +1,7 @@
 import os
 import re
 import difflib
+import io
 from datetime import datetime
 from urllib.parse import unquote
  
@@ -13,9 +14,14 @@ from streamlit_calendar import calendar as st_calendar
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
 # ============================================================
-# OUTAGES PROGRAMME (external network file, read directly)
+# OUTAGES PROGRAMME (uploaded by the user - not read from the network)
 # ============================================================
-OUTAGE_PATH = r"\\gaeltec-gl\Gaeltec_Network\62.OHLT.UK\03.SPEN\21.Planning\1 - Outages Programme\High-level_planning_2026.xlsx"
+# Streamlit Cloud has no access to internal UNC/network paths, so the
+# workbook is uploaded via a file_uploader instead of read from disk.
+# This constant is only used to rebuild the folder link target on each
+# Outage # hyperlink (the hyperlinks in the file are relative paths) -
+# it's just a string, not something the app reads from directly.
+OUTAGE_BASE_DIR = r"\\gaeltec-gl\Gaeltec_Network\62.OHLT.UK\03.SPEN\21.Planning\1 - Outages Programme"
  
  
 def _unc_to_file_uri(path: str) -> str:
@@ -27,10 +33,11 @@ def _unc_to_file_uri(path: str) -> str:
     return "file:///" + p.lstrip("/")  # local drive: file:///C:/...
  
  
-@st.cache_data(show_spinner="Loading outage programme...")
-def load_outage_programme(path: str, mtime: float) -> pd.DataFrame:
-    """mtime is only passed in to bust the Streamlit cache when the source
-    file on the network share actually changes - it is not used otherwise.
+@st.cache_data(show_spinner="Reading outage programme...")
+def load_outage_programme(file_bytes: bytes) -> pd.DataFrame:
+    """Cached on the uploaded file's bytes - re-parses only when a
+    different file (or a changed version of the same file) is uploaded,
+    not on every rerun/widget interaction.
  
     Uses openpyxl directly (not pandas) because the Outage # column stores
     a clickable hyperlink to a job folder on the network share, and pandas'
@@ -38,9 +45,7 @@ def load_outage_programme(path: str, mtime: float) -> pd.DataFrame:
     Note: this must NOT use read_only=True - openpyxl's read-only mode does
     not expose cell.hyperlink at all.
     """
-    base_dir = os.path.dirname(path)
- 
-    wb = openpyxl.load_workbook(path, data_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb["2026"]
  
     rows = []
@@ -66,7 +71,7 @@ def load_outage_programme(path: str, mtime: float) -> pd.DataFrame:
         hyperlink = outage_cell.hyperlink
         if hyperlink is not None and hyperlink.target:
             target = unquote(hyperlink.target)
-            full_path = os.path.normpath(os.path.join(base_dir, target))
+            full_path = os.path.normpath(os.path.join(OUTAGE_BASE_DIR, target))
             link = _unc_to_file_uri(full_path)
  
         rows.append({
@@ -88,14 +93,6 @@ def load_outage_programme(path: str, mtime: float) -> pd.DataFrame:
     if not df.empty:
         df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
     return df
- 
- 
-def get_outage_programme(path: str):
-    if not os.path.exists(path):
-        st.sidebar.warning(f"Can't reach outage programme file:\n{path}")
-        return None
-    mtime = os.path.getmtime(path)
-    return load_outage_programme(path, mtime)
  
  
 # ============================================================
@@ -768,11 +765,22 @@ with tab_jobs:
     else:
         st.caption("No job column selected in the sidebar mapping.")
  
-    # ---- Outages Programme (external network file, read directly + cached) ----
+    # ---- Outages Programme (uploaded workbook, cached on file content) ----
     st.divider()
     st.subheader("Outages Programme 2026")
  
-    outage_df = get_outage_programme(OUTAGE_PATH)
+    outage_upload = st.file_uploader(
+        "Upload High-level_planning_2026.xlsx",
+        type=["xlsx"],
+        key="outage_file_uploader",
+    )
+ 
+    if outage_upload is None:
+        st.info("Upload the outages programme workbook (sheet '2026', header on row 7) to see it here.")
+        outage_df = None
+    else:
+        outage_df = load_outage_programme(outage_upload.getvalue())
+ 
     if outage_df is not None:
         st.caption(f"{len(outage_df):,} rows from High-level_planning_2026.xlsx (sheet '2026')")
  
