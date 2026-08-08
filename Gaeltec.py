@@ -2,13 +2,15 @@ import os
 import re
 import difflib
 import io
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from urllib.parse import unquote
  
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import openpyxl
+import plotly.graph_objects as go
 from streamlit_calendar import calendar as st_calendar
  
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
@@ -23,6 +25,11 @@ st.set_page_config(page_title="Network Job Tracker", layout="wide")
 # it's just a string, not something the app reads from directly.
 OUTAGE_BASE_DIR = r"\\gaeltec-gl\Gaeltec_Network\62.OHLT.UK\03.SPEN\21.Planning\1 - Outages Programme"
  
+_XML_NS = {
+    "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+}
+ 
  
 def _unc_to_file_uri(path: str) -> str:
     """Converts a Windows/UNC path to a file:// URI, e.g.
@@ -33,65 +40,101 @@ def _unc_to_file_uri(path: str) -> str:
     return "file:///" + p.lstrip("/")  # local drive: file:///C:/...
  
  
+def _resolve_hyperlink_target(target: str) -> str:
+    """Hyperlink targets in this workbook are usually relative to the
+    workbook's own folder (e.g. '2026/07 - July/...'), but some are
+    already a full UNC path - handle both."""
+    decoded = unquote(target)
+    if decoded.startswith("\\\\") or decoded.startswith("//"):
+        full_path = os.path.normpath(decoded)
+    else:
+        full_path = os.path.normpath(os.path.join(OUTAGE_BASE_DIR, decoded))
+    return _unc_to_file_uri(full_path)
+ 
+ 
+def _extract_column_hyperlinks(file_bytes: bytes, sheet_name: str, column_letter: str) -> dict:
+    """Reads only the raw sheet XML + its relationships file to pull hyperlink
+    targets for ONE column - roughly 2x faster than a full openpyxl parse,
+    since it skips shared strings, styles, cell formatting, and every other
+    sheet in the workbook. Returns {excel_row_number: raw_target_string}."""
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+        wb_root = ET.fromstring(z.read("xl/workbook.xml"))
+        rels_root = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+ 
+        sheet_rid = None
+        for sh in wb_root.find("m:sheets", _XML_NS):
+            if sh.get("name") == sheet_name:
+                sheet_rid = sh.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                break
+        if sheet_rid is None:
+            return {}
+ 
+        target_path = None
+        for rel in rels_root:
+            if rel.get("Id") == sheet_rid:
+                target_path = rel.get("Target")
+                break
+        if target_path is None:
+            return {}
+ 
+        sheet_path = "xl/" + target_path.lstrip("/")
+        sheet_root = ET.fromstring(z.read(sheet_path))
+        hyperlinks_el = sheet_root.find("m:hyperlinks", _XML_NS)
+        if hyperlinks_el is None:
+            return {}
+ 
+        rels_path = f"xl/worksheets/_rels/{target_path.split('/')[-1]}.rels"
+        rel_map = {}
+        if rels_path in z.namelist():
+            sheet_rels_root = ET.fromstring(z.read(rels_path))
+            for rel in sheet_rels_root:
+                rel_map[rel.get("Id")] = rel.get("Target")
+ 
+        links = {}
+        for hl in hyperlinks_el.findall("m:hyperlink", _XML_NS):
+            ref = hl.get("ref")
+            rid = hl.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+            if not (ref and rid and rid in rel_map):
+                continue
+            m = re.match(r"([A-Z]+)(\d+)", ref)
+            if not m or m.group(1) != column_letter:
+                continue
+            links[int(m.group(2))] = rel_map[rid]
+        return links
+ 
+ 
 @st.cache_data(show_spinner="Reading outage programme...")
 def load_outage_programme(file_bytes: bytes) -> pd.DataFrame:
     """Cached on the uploaded file's bytes - re-parses only when a
     different file (or a changed version of the same file) is uploaded,
     not on every rerun/widget interaction.
  
-    Uses openpyxl directly (not pandas) because the Outage # column stores
-    a clickable hyperlink to a job folder on the network share, and pandas'
-    read_excel discards hyperlinks - it only sees the displayed cell text.
-    Note: this must NOT use read_only=True - openpyxl's read-only mode does
-    not expose cell.hyperlink at all.
+    Uses pandas (fast path, values only) for the table, plus a lightweight
+    raw-XML scan of just the Outage # column for hyperlinks - pandas'
+    read_excel discards hyperlinks entirely (it only sees displayed text),
+    and openpyxl only exposes hyperlinks in its slow, full (non-read-only)
+    parse mode, so this avoids paying that cost for the other 13 columns.
     """
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-    ws = wb["2026"]
+    df = pd.read_excel(
+        io.BytesIO(file_bytes),
+        sheet_name="2026",
+        header=6,                     # Excel row 7 is the header row (0-indexed = 6)
+        usecols="A,B,C,E,F,G,L,M,N",  # District, Outage Date, Weekday, Scheme, Outage #, Circuit, PID, SPEN PM, POI
+        engine="openpyxl",
+    )
+    df.columns = [
+        "District", "Outage Date", "Weekday", "Scheme",
+        "Outage #", "Circuit", "PID", "SPEN PM", "POI",
+    ]
+    df = df.dropna(how="all")
+    df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
  
-    rows = []
-    # Excel row 7 is the header, so data starts at row 8.
-    # Columns: A District, B Outage Date, C Weekday, E Scheme, F Outage #,
-    # G Circuit, L PID, M SPEN PM, N POI.
-    for row in ws.iter_rows(min_row=8, max_row=ws.max_row, min_col=1, max_col=14):
-        district = row[0].value
-        outage_date = row[1].value
-        weekday = row[2].value
-        scheme = row[4].value
-        outage_cell = row[5]
-        outage_num = outage_cell.value
-        circuit = row[6].value
-        pid = row[11].value
-        spen_pm = row[12].value
-        poi = row[13].value
+    # data starts at Excel row 8, and df's index (preserved through dropna)
+    # is 0-based from the first data row, so excel_row = index + 8
+    link_targets = _extract_column_hyperlinks(file_bytes, "2026", "F")
+    df["Link"] = [link_targets.get(idx + 8) for idx in df.index]
+    df["Link"] = df["Link"].apply(lambda t: _resolve_hyperlink_target(t) if isinstance(t, str) else None)
  
-        if district is None and outage_date is None and scheme is None:
-            continue  # skip fully blank rows
- 
-        link = None
-        hyperlink = outage_cell.hyperlink
-        if hyperlink is not None and hyperlink.target:
-            target = unquote(hyperlink.target)
-            full_path = os.path.normpath(os.path.join(OUTAGE_BASE_DIR, target))
-            link = _unc_to_file_uri(full_path)
- 
-        rows.append({
-            "District": district,
-            "Outage Date": outage_date,
-            "Weekday": weekday,
-            "Scheme": scheme,
-            "Outage #": outage_num,
-            "Circuit": circuit,
-            "PID": pid,
-            "SPEN PM": spen_pm,
-            "POI": poi,
-            "Link": link,
-        })
- 
-    wb.close()
- 
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
     return df
  
  
@@ -462,8 +505,14 @@ def read_file(file) -> pd.DataFrame:
     return df
  
  
+@st.cache_data(show_spinner="Processing data...")
 def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
-    """cols: the resolved {logical_name: real_column_name} mapping picked in the sidebar."""
+    """cols: the resolved {logical_name: real_column_name} mapping picked in the sidebar.
+ 
+    Cached: Streamlit reruns the whole script on every filter/widget change,
+    which would otherwise re-run normalize_item() over every row and rebuild
+    the category lookup on every single interaction. This only recomputes
+    when the uploaded data or the column mapping actually changes."""
     df = df.copy()
     item_col = cols["item_col"]
     qsub_col = cols["qsub_col"]
@@ -684,8 +733,8 @@ if circuits:
 st.sidebar.divider()
 st.sidebar.metric("Rows after filters", f"{len(f):,}", delta=f"of {len(df):,} total")
  
-tab_overview, tab_jobs, tab_items, tab_totals = st.tabs(
-    ["📊 Overview", "🗂️ Jobs", "📦 Mapped Items", "💰 Totals"]
+tab_overview, tab_jobs, tab_items, tab_forecast, tab_totals = st.tabs(
+    ["📊 Overview", "🗂️ Jobs", "📦 Mapped Items", "📈 Pole Position", "💰 Totals"]
 )
  
 # ---- Overview: CV7_recover over time ----
@@ -746,27 +795,7 @@ with tab_overview:
  
 # ---- Jobs tab ----
 with tab_jobs:
-    st.subheader("Jobs (District → Job → Circuit → PID)")
-    job_col = cols["job_col"]
-    if job_col and job_col in f.columns:
-        job_table = pd.DataFrame({
-            "District": f[district_col],
-            "Job": f["_job_clean"],
-            "Circuit": f[circuit_col],
-            "PID": f[cols["pid_col"]] if cols["pid_col"] in f.columns else "",
-        })
-        st.caption(f"{len(job_table):,} rows under the current filters")
-        collapse = st.checkbox("Collapse near-duplicate job names (≥65% similar)", value=False, key="jobs_dedupe")
-        if collapse:
-            job_table["_dup"] = dedupe_jobs(job_table["Job"].tolist())
-            job_table = job_table[~job_table["_dup"]].drop(columns="_dup")
-            st.caption(f"{len(job_table):,} rows after collapsing")
-        st.dataframe(job_table, height=420, use_container_width=True, hide_index=True)
-    else:
-        st.caption("No job column selected in the sidebar mapping.")
- 
     # ---- Outages Programme (uploaded workbook, cached on file content) ----
-    st.divider()
     st.subheader("Outages Programme 2026")
  
     outage_upload = st.file_uploader(
@@ -829,9 +858,14 @@ with tab_jobs:
  
             events = []
             for _, r in outage_f.dropna(subset=["Outage Date"]).iterrows():
+                link_val = r.get("Link")
+                has_link = isinstance(link_val, str) and link_val
                 title_bits = [str(r["District"]) if pd.notna(r["District"]) else "", str(r["Scheme"]) if pd.notna(r["Scheme"]) else ""]
+                title = " — ".join(b for b in title_bits if b)
+                if has_link:
+                    title = "📎 " + title  # flags which outages have a linked folder, before you even click
                 events.append({
-                    "title": " — ".join(b for b in title_bits if b),
+                    "title": title,
                     "start": r["Outage Date"].strftime("%Y-%m-%d"),
                     "allDay": True,
                     "backgroundColor": DISTRICT_COLORS.get(r["District"], "#2563eb"),
@@ -844,7 +878,7 @@ with tab_jobs:
                         "pid": None if pd.isna(r["PID"]) else str(r["PID"]),
                         "spen_pm": None if pd.isna(r["SPEN PM"]) else str(r["SPEN PM"]),
                         "poi": None if pd.isna(r["POI"]) else str(r["POI"]),
-                        "link": None if pd.isna(r.get("Link")) else r.get("Link"),
+                        "link": link_val if has_link else None,
                     },
                 })
  
@@ -880,12 +914,18 @@ with tab_jobs:
  
                 link = props.get("link")
                 if link:
-                    st.markdown(f"[📂 Open outage folder]({link})")
-                    st.caption("Opens as a local/network file link - works when your browser and OS allow file:// links to that network share.")
+                    st.markdown(
+                        f'<a href="{link}" target="_blank" rel="noopener" '
+                        f'style="display:inline-block; padding:6px 14px; background:#2563eb; '
+                        f'color:white; border-radius:6px; text-decoration:none; font-weight:600;">'
+                        f'📂 Open outage folder</a>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("Opens in a new tab as a local/network file link - works when your browser and OS allow file:// links to that network share.")
                 else:
                     st.caption("No linked folder for this outage.")
             else:
-                st.caption("Click an outage on the calendar to see its details and folder link here.")
+                st.caption("Click an outage on the calendar to see its details and folder link here. Outages marked 📎 have a linked folder.")
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
@@ -967,7 +1007,152 @@ with tab_items:
         })
         st.dataframe(detail, height=320, use_container_width=True, hide_index=True)
  
-# ---- Totals tab ----
+# ---- Poles Forecast tab ----
+@st.cache_data(show_spinner="Reading poles forecast workbook...")
+def list_forecast_sheets(file_bytes: bytes):
+    return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
+ 
+ 
+@st.cache_data(show_spinner="Reading poles forecast workbook...")
+def load_forecast_workbook(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
+    fdf = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+    fdf.columns = fdf.columns.astype(str).str.strip()
+    return fdf
+ 
+ 
+with tab_forecast:
+    st.subheader("Pole Position")
+ 
+    forecast_upload = st.file_uploader(
+        "Upload poles forecast workbook (.xlsx)",
+        type=["xlsx"],
+        key="forecast_file_uploader",
+    )
+ 
+    if forecast_upload is None:
+        st.info(
+            "Upload the workbook with columns: District, Project ID, Project, "
+            "Circuit, Voltage, Forecasted Total poles, Poles Disposed."
+        )
+    else:
+        f_bytes = forecast_upload.getvalue()
+        sheet_names = list_forecast_sheets(f_bytes)
+        sheet_choice = (
+            st.selectbox("Sheet", sheet_names, key="forecast_sheet")
+            if len(sheet_names) > 1 else sheet_names[0]
+        )
+        fdf = load_forecast_workbook(f_bytes, sheet_choice)
+ 
+        with st.expander("Detected columns (click to view)"):
+            st.write(list(fdf.columns))
+ 
+        def fguess(*candidates):
+            lower_map = {c.lower(): c for c in fdf.columns}
+            for cand in candidates:
+                if cand.lower() in lower_map:
+                    return lower_map[cand.lower()]
+            return None
+ 
+        fcol_options = ["(none)"] + list(fdf.columns)
+ 
+        with st.expander("⚙️ Column mapping", expanded=False):
+            def fpick(label, default_col, key):
+                idx = fcol_options.index(default_col) if default_col in fcol_options else 0
+                if default_col is None:
+                    st.warning(f"Couldn't guess a column for **{label}** - pick one.")
+                val = st.selectbox(label, fcol_options, index=idx, key=key)
+                return None if val == "(none)" else val
+ 
+            f_cols = {
+                "district": fpick("District", fguess("District"), "fc_district"),
+                "pid": fpick("Project ID", fguess("Project ID", "PID"), "fc_pid"),
+                "project": fpick("Project", fguess("Project", "Project Name"), "fc_project"),
+                "circuit": fpick("Circuit", fguess("Circuit"), "fc_circuit"),
+                "voltage": fpick("Voltage", fguess("Voltage"), "fc_voltage"),
+                "forecast": fpick(
+                    "Forecasted Total poles",
+                    fguess("Forecasted Total poles", "Forecasted Total Poles", "Forecast Total Poles"),
+                    "fc_forecast",
+                ),
+                "disposed": fpick("Poles Disposed", fguess("Poles Disposed", "Poles disposed"), "fc_disposed"),
+            }
+ 
+        required = ["project", "circuit", "pid", "forecast", "disposed"]
+        missing = [k for k in required if f_cols[k] is None]
+        if missing:
+            st.error(f"Please map these columns in 'Column mapping' above: {missing}")
+        else:
+            plot_df = pd.DataFrame({
+                "District": fdf[f_cols["district"]] if f_cols["district"] else "",
+                "PID": fdf[f_cols["pid"]],
+                "Project": fdf[f_cols["project"]],
+                "Circuit": fdf[f_cols["circuit"]],
+                "Voltage": fdf[f_cols["voltage"]] if f_cols["voltage"] else "",
+                "Forecast": pd.to_numeric(fdf[f_cols["forecast"]], errors="coerce").fillna(0),
+                "Disposed": pd.to_numeric(fdf[f_cols["disposed"]], errors="coerce").fillna(0),
+            })
+            plot_df = plot_df.dropna(subset=["Project"])
+            # clamp so a data-entry error (disposed > forecasted) never draws past the bar
+            plot_df["Disposed"] = plot_df[["Disposed", "Forecast"]].min(axis=1)
+            plot_df["Remaining"] = (plot_df["Forecast"] - plot_df["Disposed"]).clip(lower=0)
+            plot_df["Label"] = (
+                plot_df["Project"].astype(str) + " — "
+                + plot_df["Circuit"].astype(str) + " — PID "
+                + plot_df["PID"].astype(str)
+            )
+ 
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                forecast_districts = (
+                    st.multiselect("District", sorted(plot_df["District"].dropna().unique()), key="forecast_district")
+                    if f_cols["district"] else []
+                )
+            with fc2:
+                forecast_voltages = (
+                    st.multiselect("Voltage", sorted(plot_df["Voltage"].dropna().unique()), key="forecast_voltage")
+                    if f_cols["voltage"] else []
+                )
+ 
+            if forecast_districts:
+                plot_df = plot_df[plot_df["District"].isin(forecast_districts)]
+            if forecast_voltages:
+                plot_df = plot_df[plot_df["Voltage"].isin(forecast_voltages)]
+ 
+            total_forecast = plot_df["Forecast"].sum()
+            total_disposed = plot_df["Disposed"].sum()
+            show_total_banner(
+                "Poles disposed vs forecasted",
+                f"{total_disposed:,.0f} / {total_forecast:,.0f}"
+                + (f"  ({total_disposed / total_forecast:.0%})" if total_forecast else ""),
+            )
+ 
+            if plot_df.empty:
+                st.caption("No rows to chart for the current filters.")
+            else:
+                plot_df = plot_df.sort_values("Forecast", ascending=True)
+ 
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    y=plot_df["Label"], x=plot_df["Disposed"], orientation="h",
+                    name="Disposed", marker_color="#16a34a",
+                    hovertemplate="%{y}<br>Disposed: %{x:,.0f}<extra></extra>",
+                ))
+                fig.add_trace(go.Bar(
+                    y=plot_df["Label"], x=plot_df["Remaining"], orientation="h",
+                    name="Remaining", marker_color="#dc2626",
+                    hovertemplate="%{y}<br>Remaining: %{x:,.0f}<extra></extra>",
+                ))
+                fig.update_layout(
+                    barmode="stack",
+                    height=max(420, 34 * len(plot_df)),
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    xaxis_title="Poles",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption(f"{len(plot_df):,} project/circuit rows shown")
+ 
+ 
 with tab_totals:
     total_val = pd.to_numeric(f[cols["total_col"]], errors="coerce").sum() if cols["total_col"] in f.columns else None
     orig_val = pd.to_numeric(f[cols["orig_col"]], errors="coerce").sum() if cols["orig_col"] in f.columns else None
@@ -1017,3 +1202,4 @@ with tab_totals:
                 .sort_values("Difference (£)", key=abs, ascending=False)
             )
             st.dataframe(by_project, height=280, use_container_width=True, hide_index=True)
+ 
