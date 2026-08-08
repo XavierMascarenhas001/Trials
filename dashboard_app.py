@@ -274,7 +274,7 @@ CARD_GROUPS = [
         ],
     },
     {
-        "title": "Switched gear",
+        "title": "Switch gear",
         "image": os.path.join(IMAGE_DIR, "Switchgear.png"),
         "subtypes": SWITCH_SUBTYPES,
     },
