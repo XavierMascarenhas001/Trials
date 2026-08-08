@@ -11,9 +11,6 @@ st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
 # ============================================================
 # YOUR MAPPING DICTIONARIES
-# (CV8 and Fuses below are now the FULL dictionaries copied from the
-#  export tool - the dashboard versions were truncated, which alone
-#  explained a chunk of the discrepancy)
 # ============================================================
 CV7_erect = {
     "Erect Single HV/EHV Pole, up to and including 12 metre pole": "CV7 HV pole",
@@ -199,6 +196,15 @@ POLE_CATEGORIES = {
     "CV7_recover": CV7_recover,
 }
  
+# Friendly labels for the pole chart/cards, in the "Display (technical_name)"
+# style so it's obvious which export-tool category each bar corresponds to.
+POLE_DISPLAY_NAMES = {
+    "CV7_erect": "CV7 (CV7_erect)",
+    "CV7_erect_H": "CV7 H Pole (CV7_erect_H)",
+    "CV7_erect_lv": "CV7 LV Pole (CV7_erect_lv)",
+    "CV7_recover": "CV7 Recover (CV7_recover)",
+}
+ 
 # NOTE: CV7_SWITCHGEAR / CV7_UG / CV7_CB were removed from ALL_CATEGORIES.
 # In the export tool, `categories` gets redefined a second time and that
 # second definition (the one actually used to build sheets/Summary) never
@@ -225,11 +231,25 @@ ALL_CATEGORIES = {
 # under a CV7 erect/recover item, then COUNT distinct poles (not sum qty).
 POLE_DEDUPE_CATEGORIES = {"CV8", "CV31"}
  
+# Switch is split into three sub-types for display instead of one lump
+# card. Each key is the display name, each value is the list of raw
+# descriptions (as written in the Switch dict above) that count toward it.
+SWITCH_SUBTYPES = {
+    "Noja": ["Noja"],
+    "Soule": ["11kV PMSW (Soule)"],
+    "ABSW": [
+        "11kv ABSW Hookstick Standard",
+        "11kv ABSW Hookstick Spring loaded mech",
+        "33kv ABSW Hookstick Dependant",
+    ],
+}
+ 
 # ============================================================
 # IMAGE GROUPS for the Mapped Items tab
 # Images live in an "Images" folder alongside this script (same repo path).
-# Any category not listed in a group falls through to the "Other items"
-# section at the end, in its normal ALL_CATEGORIES order.
+# "image": None means the group is shown without an image (no warning).
+# Any category not listed in a group's "categories" (or covered by
+# "subtypes") falls through to the "Other items" section at the end.
 # ============================================================
 IMAGE_DIR = "Images"
 CARD_GROUPS = [
@@ -244,7 +264,7 @@ CARD_GROUPS = [
         "categories": ["CV7_Tx", "transformer"],
     },
     {
-        "title": "Cable",
+        "title": "Conductor",
         "image": os.path.join(IMAGE_DIR, "Cable.png"),
         "categories": [
             "CV7_OHL_CONDUCTOR_instal",
@@ -252,6 +272,11 @@ CARD_GROUPS = [
             "CV7_OHL_CONDUCTOR_LV_instal",
             "CV7_OHL_CONDUCTOR_LV_recover",
         ],
+    },
+    {
+        "title": "Switched gear",
+        "image": os.path.join(IMAGE_DIR, "Switchgear.png"),
+        "subtypes": SWITCH_SUBTYPES,
     },
 ]
  
@@ -325,6 +350,20 @@ def dedupe_jobs(values, threshold=0.65):
         if not hit:
             kept.append(v)
     return is_dup
+ 
+ 
+def show_total_banner(label, value_str):
+    """A large, centered KPI number - meant to sit directly under a chart's
+    subheader so the total is the first thing seen after the title."""
+    st.markdown(
+        f"""
+        <div style="text-align:center; padding: 4px 0 18px 0;">
+            <div style="font-size:2.6rem; font-weight:800; color:#1e3a8a; line-height:1.15;">{value_str}</div>
+            <div style="font-size:0.9rem; color:#475569; text-transform:uppercase; letter-spacing:0.05em;">{label}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
  
  
 @st.cache_data
@@ -409,8 +448,11 @@ def cv_pole_resume(frame: pd.DataFrame, mapping: dict, cv7_poles: set) -> pd.Dat
  
  
 def build_card(frame: pd.DataFrame, cat_name: str, mapping: dict, cv7_poles: set):
-    """Returns (cat_name, total_qty, sub) for a single category, or None
-    if there are no matching rows under the current filters."""
+    """Returns (cat_name, total_qty, sub) for a single category, filtered
+    strictly by that category's OWN item keys - never by the shared
+    "_mapped_category" label, since several categories map to the same
+    label (e.g. CV7_erect and CV7_erect_H both -> "CV7 HV pole") and
+    grouping by label would merge their counts together."""
     if cat_name in POLE_DEDUPE_CATEGORIES:
         sub = cv_pole_resume(frame, mapping, cv7_poles)
         if sub.empty:
@@ -424,13 +466,22 @@ def build_card(frame: pd.DataFrame, cat_name: str, mapping: dict, cv7_poles: set
         return (cat_name, sub["_qsub_adj"].sum(), sub)
  
  
-def render_metric(slot, cat_name: str, total_qty):
+def build_subtype_card(frame: pd.DataFrame, subtype_name: str, descriptions: list):
+    keys = {normalize_item(d) for d in descriptions}
+    sub = frame[frame["_item_norm"].isin(keys)]
+    if sub.empty:
+        return None
+    return (subtype_name, sub["_qsub_adj"].sum(), sub)
+ 
+ 
+def render_metric(slot, cat_name: str, total_qty, display_name: str = None):
+    label = display_name or cat_name
     if cat_name in UNIT_CONFIG:
-        slot.metric(cat_name, format_length(total_qty, UNIT_CONFIG[cat_name]))
+        slot.metric(label, format_length(total_qty, UNIT_CONFIG[cat_name]))
     elif cat_name in POLE_DEDUPE_CATEGORIES:
-        slot.metric(cat_name, f"{total_qty:,.0f} poles")
+        slot.metric(label, f"{total_qty:,.0f} poles")
     else:
-        slot.metric(cat_name, f"{total_qty:,.0f}")
+        slot.metric(label, f"{total_qty:,.0f}")
  
  
 # ============================================================
@@ -556,6 +607,8 @@ with tab_overview:
     st.subheader("CV7_recover — count over time")
     recover_keys = {normalize_item(k) for k in CV7_recover}
     recover_df = f[f["_item_norm"].isin(recover_keys)]
+    recover_total = recover_df["_qsub_adj"].sum()
+    show_total_banner("Total CV7_recover count", f"{recover_total:,.0f}")
  
     if recover_df.empty or recover_df["_date"].isna().all():
         st.caption("No CV7_recover records (with a date) for the current filters.")
@@ -576,14 +629,25 @@ with tab_overview:
         st.plotly_chart(fig, use_container_width=True)
  
     st.subheader("All pole categories")
-    pole_keys = set()
-    for mapping in POLE_CATEGORIES.values():
-        pole_keys |= {normalize_item(k) for k in mapping}
-    pole_df = f[f["_item_norm"].isin(pole_keys)]
-    pole_summary = (
-        pole_df.groupby("_mapped_category")["_qsub_adj"].sum().reset_index()
-        .rename(columns={"_mapped_category": "Pole type", "_qsub_adj": "Count"})
-    )
+    # Grouped by SOURCE category (CV7_erect / CV7_erect_H / CV7_erect_lv /
+    # CV7_recover), not by the shared "_mapped_category" label - several of
+    # these categories map to the same label ("CV7 HV pole"), so grouping
+    # by label would silently merge their counts. This mirrors how the
+    # export tool's Summary sheet keeps each category as its own column.
+    pole_rows = []
+    for cat_name, mapping in POLE_CATEGORIES.items():
+        keys = {normalize_item(k) for k in mapping}
+        sub = f[f["_item_norm"].isin(keys)]
+        if not sub.empty:
+            pole_rows.append({
+                "Pole type": POLE_DISPLAY_NAMES.get(cat_name, cat_name),
+                "Count": sub["_qsub_adj"].sum(),
+            })
+    pole_summary = pd.DataFrame(pole_rows)
+ 
+    pole_total = pole_summary["Count"].sum() if not pole_summary.empty else 0
+    show_total_banner("Total poles (all categories)", f"{pole_total:,.0f}")
+ 
     if not pole_summary.empty:
         fig2 = px.bar(pole_summary, x="Pole type", y="Count", text="Count", color="Pole type")
         fig2.update_layout(showlegend=False, margin=dict(t=10, b=10))
@@ -618,32 +682,43 @@ with tab_items:
  
     cv7_poles = cv7_dedupe_poles(f)
     all_card_data = []  # accumulated in display order, feeds the detail selectbox below
-    grouped_cat_names = {c for group in CARD_GROUPS for c in group["categories"]}
+ 
+    grouped_cat_names = {c for group in CARD_GROUPS for c in group.get("categories", [])}
+    grouped_cat_names |= {c for group in CARD_GROUPS if "subtypes" in group for c in ["Switch"]}
  
     for group in CARD_GROUPS:
-        title = os.path.splitext(os.path.basename(group["image"]))[0]
+        title = group["title"]
         img_l, img_c, img_r = st.columns([1, 1, 1])
         with img_c:
             st.markdown(f"<h3 style='text-align:center; margin-bottom:0.3rem;'>{title}</h3>", unsafe_allow_html=True)
-            if os.path.exists(group["image"]):
-                st.image(group["image"], width=300)
-            else:
-                st.caption(f"⚠️ Image not found: {group['image']}")
+            image_path = group.get("image")
+            if image_path and os.path.exists(image_path):
+                st.image(image_path, width=300)
+            elif image_path:
+                st.caption(f"⚠️ Image not found: {image_path}")
  
         group_cards = []
-        for cat_name in group["categories"]:
-            mapping = ALL_CATEGORIES.get(cat_name)
-            if mapping is None:
-                continue
-            card = build_card(f, cat_name, mapping, cv7_poles)
-            if card:
-                group_cards.append(card)
-                all_card_data.append(card)
+ 
+        if "subtypes" in group:
+            for subtype_name, descriptions in group["subtypes"].items():
+                card = build_subtype_card(f, subtype_name, descriptions)
+                if card:
+                    group_cards.append(card)
+                    all_card_data.append(card)
+        else:
+            for cat_name in group.get("categories", []):
+                mapping = ALL_CATEGORIES.get(cat_name)
+                if mapping is None:
+                    continue
+                card = build_card(f, cat_name, mapping, cv7_poles)
+                if card:
+                    group_cards.append(card)
+                    all_card_data.append(card)
  
         if group_cards:
             row_cols = st.columns(len(group_cards))
             for slot, (cat_name, total_qty, _sub) in zip(row_cols, group_cards):
-                render_metric(slot, cat_name, total_qty)
+                render_metric(slot, cat_name, total_qty, display_name=POLE_DISPLAY_NAMES.get(cat_name))
         else:
             st.caption("No records for this group under the current filters.")
  
@@ -685,6 +760,9 @@ with tab_items:
 with tab_totals:
     total_val = pd.to_numeric(f[cols["total_col"]], errors="coerce").sum() if cols["total_col"] in f.columns else None
     orig_val = pd.to_numeric(f[cols["orig_col"]], errors="coerce").sum() if cols["orig_col"] in f.columns else None
+ 
+    if total_val is not None:
+        show_total_banner("Total value (£)", f"£{total_val:,.2f}")
  
     c1, c2 = st.columns(2)
     if total_val is not None:
