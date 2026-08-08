@@ -628,14 +628,17 @@ with tab_overview:
         fig.update_layout(margin=dict(t=10, b=10))
         st.plotly_chart(fig, use_container_width=True)
  
-    st.subheader("All pole categories")
-    # Grouped by SOURCE category (CV7_erect / CV7_erect_H / CV7_erect_lv /
-    # CV7_recover), not by the shared "_mapped_category" label - several of
-    # these categories map to the same label ("CV7 HV pole"), so grouping
-    # by label would silently merge their counts. This mirrors how the
+    st.subheader("All pole categories (erect only)")
+    # Grouped by SOURCE category (CV7_erect / CV7_erect_H / CV7_erect_lv),
+    # not by the shared "_mapped_category" label - several of these
+    # categories map to the same label ("CV7 HV pole"), so grouping by
+    # label would silently merge their counts. This mirrors how the
     # export tool's Summary sheet keeps each category as its own column.
+    # CV7_recover is excluded here since it already has its own chart above.
     pole_rows = []
     for cat_name, mapping in POLE_CATEGORIES.items():
+        if cat_name == "CV7_recover":
+            continue
         keys = {normalize_item(k) for k in mapping}
         sub = f[f["_item_norm"].isin(keys)]
         if not sub.empty:
@@ -806,3 +809,4 @@ with tab_totals:
                 .sort_values("Difference (£)", key=abs, ascending=False)
             )
             st.dataframe(by_project, height=280, use_container_width=True, hide_index=True)
+ 
