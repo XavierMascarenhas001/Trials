@@ -844,7 +844,7 @@ with tab_jobs:
                         "pid": None if pd.isna(r["PID"]) else str(r["PID"]),
                         "spen_pm": None if pd.isna(r["SPEN PM"]) else str(r["SPEN PM"]),
                         "poi": None if pd.isna(r["POI"]) else str(r["POI"]),
-                        "link": r.get("Link"),
+                        "link": None if pd.isna(r.get("Link")) else r.get("Link"),
                     },
                 })
  
