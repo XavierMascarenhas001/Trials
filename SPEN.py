@@ -1,3 +1,4 @@
+ 
 import datetime as dt
  
 import pandas as pd
@@ -35,7 +36,6 @@ PLOTLY_DARK = dict(
     paper_bgcolor="#131922",
     plot_bgcolor="#131922",
     font=dict(color="#E7ECF2", family="IBM Plex Mono, monospace", size=12),
-    legend=dict(bgcolor="rgba(0,0,0,0)"),
     margin=dict(l=10, r=10, t=30, b=10),
 )
  
