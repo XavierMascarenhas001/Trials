@@ -1,3 +1,4 @@
+
 import datetime as dt
  
 import numpy as np
@@ -497,94 +498,120 @@ with tab_pid:
         ])
         st.caption(f"{len(agg)} PID(s) in view — Remaining/Planned/Done/Invoiced sum to Total; Variance is total vs. original budget")
  
-        y_levels = [
-            agg["district_label"].tolist(),
-            agg["project_label"].tolist(),
-            agg["pm_label"].tolist(),
-            agg["pid"].tolist(),
-        ]
-        hover_job = agg["job"].fillna("")
+        # ---- render: plain HTML/CSS grouped bars (District > Project > PM > PID) ----
+        # Plotly's multicategory axis proved unreliable at this row count/depth — this is
+        # deterministic: exactly one proportional bar row per PID, grouped under nested headers.
  
-        STAGES = [
+        def esc(s):
+            return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+ 
+        STAGE_COLS = [
             ("remaining", "Remaining", COLOR_RED),
             ("planned", "Planned", COLOR_AMBER),
             ("done", "Done", COLOR_DARKBLUE),
             ("invoiced", "Invoiced", COLOR_PURPLE),
         ]
  
-        fig3 = go.Figure()
-        for col, label, color in STAGES:
-            vals = agg[col]
-            fig3.add_trace(go.Bar(
-                y=y_levels, x=vals, name=label, orientation="h",
-                marker_color=color,
-                customdata=hover_job,
-                hovertemplate=(
-                    f"<b>{label}</b>: £%{{x:,.2f}}<br>Job: %{{customdata}}<extra></extra>"
-                ),
-            ))
- 
-        # end-of-bar marker + label: evidences Total and Invoiced right where the bar ends,
-        # marker colour carries the variance sign (green = under/at budget, red = over budget)
-        invoiced_pct = np.where(agg["total"] > 0, agg["invoiced"] / agg["total"] * 100, 0.0)
-        end_labels = [
-            f"<b>Total {fmt_money_short(t)}</b>  ·  Invoiced {fmt_money_short(iv)} ({p:.0f}%)"
-            for t, iv, p in zip(agg["total"], agg["invoiced"], invoiced_pct)
-        ]
- 
-        # end-of-bar label (text only, no markers here — markers come from the two traces below)
-        fig3.add_trace(go.Scatter(
-            x=agg["total"], y=y_levels, mode="text",
-            text=end_labels,
-            textposition="middle right",
-            textfont=dict(size=11, color=TEXT_DARK, family="IBM Plex Mono, monospace"),
-            customdata=agg["variance"],
-            hovertemplate="Variance: £%{customdata:,.2f}<extra></extra>",
-            showlegend=False,
-            cliponaxis=False,
-        ))
- 
-        # variance markers, split into two real (correctly-shaped) traces so the legend is accurate
-        # and every trace on this multicategory axis carries a consistent per-level array length
-        def _filter_levels(levels, mask):
-            return [[v for v, m in zip(lvl, mask) if m] for lvl in levels]
- 
-        pos_mask = (agg["variance"] >= 0).to_numpy()
-        neg_mask = ~pos_mask
-        for mask, label, color in [(pos_mask, "At/under budget (variance ≥ 0)", COLOR_GREEN),
-                                    (neg_mask, "Over budget (variance < 0)", COLOR_RED)]:
-            if mask.any():
-                fig3.add_trace(go.Scatter(
-                    x=agg["total"][mask], y=_filter_levels(y_levels, mask),
-                    mode="markers",
-                    marker=dict(symbol="diamond", size=8, color=color, line=dict(width=1, color="#FFFFFF")),
-                    name=label, hoverinfo="skip",
-                ))
- 
-        n_pid = len(agg)
-        row_h = 24
-        fig_height = max(500, row_h * n_pid + 160)
- 
-        fig3.update_layout(
-            **PLOTLY_LIGHT,
-            height=fig_height,
-            barmode="stack",
-            xaxis=dict(
-                title="£", tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False,
-                tickfont=dict(size=12), range=[0, agg["total"].max() * 1.55],
-            ),
-            yaxis=dict(
-                gridcolor=GRID_LIGHT, automargin=True, tickfont=dict(size=12),
-                autorange="reversed",
-            ),
-            legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center", bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
-            bargap=0.22,
-            margin=dict(l=10, r=10, t=40, b=10),
+        legend_html = "".join(
+            f"<span style='display:inline-flex;align-items:center;gap:5px;margin-right:16px;"
+            f"font-family:\"IBM Plex Mono\",monospace;font-size:11px;color:{TEXT_MUTED};'>"
+            f"<span style='width:11px;height:11px;border-radius:3px;background:{color};display:inline-block;'></span>"
+            f"{label}</span>"
+            for _, label, color in STAGE_COLS
         )
-        st.plotly_chart(fig3, use_container_width=True)
+        legend_html += (
+            f"<span style='display:inline-flex;align-items:center;gap:5px;margin-right:16px;"
+            f"font-family:\"IBM Plex Mono\",monospace;font-size:11px;color:{TEXT_MUTED};'>"
+            f"<span style='width:9px;height:9px;border-radius:50%;background:{COLOR_GREEN};display:inline-block;'></span>"
+            f"At/under budget</span>"
+            f"<span style='display:inline-flex;align-items:center;gap:5px;"
+            f"font-family:\"IBM Plex Mono\",monospace;font-size:11px;color:{TEXT_MUTED};'>"
+            f"<span style='width:9px;height:9px;border-radius:50%;background:{COLOR_RED};display:inline-block;'></span>"
+            f"Over budget</span>"
+        )
+        st.markdown(f"<div style='margin:6px 0 14px;'>{legend_html}</div>", unsafe_allow_html=True)
+ 
+        rows_html = []
+        last_district, last_project, last_pm = None, None, None
+ 
+        for _, r in agg.iterrows():
+            if r["district_label"] != last_district:
+                d_total = agg.loc[agg["district_label"] == r["district_label"], "total"].sum()
+                rows_html.append(
+                    f"<div style='background:{COLOR_NAVY};color:#fff;padding:8px 14px;"
+                    f"font-family:\"IBM Plex Mono\",monospace;font-size:13px;font-weight:700;"
+                    f"letter-spacing:.04em;text-transform:uppercase;margin-top:14px;border-radius:4px;"
+                    f"display:flex;justify-content:space-between;'>"
+                    f"<span>{esc(r['district_label'])}</span><span>{fmt_money(d_total)}</span></div>"
+                )
+                last_district, last_project, last_pm = r["district_label"], None, None
+ 
+            if r["project_label"] != last_project:
+                p_total = agg.loc[
+                    (agg["district_label"] == r["district_label"]) & (agg["project_label"] == r["project_label"]),
+                    "total",
+                ].sum()
+                rows_html.append(
+                    f"<div style='background:#EEF1F5;color:{TEXT_DARK};padding:6px 14px 6px 26px;"
+                    f"font-family:\"IBM Plex Mono\",monospace;font-size:11.5px;font-weight:600;"
+                    f"letter-spacing:.03em;text-transform:uppercase;margin-top:6px;border-radius:3px;"
+                    f"display:flex;justify-content:space-between;'>"
+                    f"<span>{esc(r['project_label'])}</span><span>{fmt_money(p_total)}</span></div>"
+                )
+                last_project, last_pm = r["project_label"], None
+ 
+            if r["pm_label"] != last_pm:
+                rows_html.append(
+                    f"<div style='padding:4px 14px 2px 40px;font-family:\"IBM Plex Sans\",sans-serif;"
+                    f"font-size:10.5px;font-style:italic;color:{TEXT_MUTED};margin-top:4px;'>"
+                    f"{esc(r['pm_label'])}</div>"
+                )
+                last_pm = r["pm_label"]
+ 
+            total = r["total"]
+            pct = {k: (r[k] / total * 100 if total > 0 else 0) for k, _, _ in STAGE_COLS}
+            invoiced_pct = (r["invoiced"] / total * 100) if total > 0 else 0.0
+            var_color = COLOR_GREEN if r["variance"] >= 0 else COLOR_RED
+            var_sign = "+" if r["variance"] >= 0 else ""
+ 
+            segs = "".join(
+                f"<div style='width:{pct[k]:.3f}%;background:{color};height:100%;' title='{label}: {fmt_money(r[k])}'></div>"
+                for k, label, color in STAGE_COLS if pct[k] > 0
+            )
+ 
+            rows_html.append(f"""
+            <div style='display:flex;align-items:center;gap:10px;padding:3px 14px 3px 52px;
+                        border-top:1px solid #F0F2F5;'>
+              <div style='width:150px;flex:none;font-family:"IBM Plex Mono",monospace;font-size:11.5px;
+                          color:{TEXT_DARK};font-weight:600;overflow:hidden;text-overflow:ellipsis;
+                          white-space:nowrap;' title="{esc(r['job'])}">{esc(r['pid'])}</div>
+              <div style='flex:1;height:15px;border-radius:3px;overflow:hidden;display:flex;background:#F0F2F5;'>
+                {segs}
+              </div>
+              <div style='width:8px;height:8px;border-radius:50%;background:{var_color};flex:none;'
+                   title='Variance: {var_sign}{fmt_money(r["variance"])}'></div>
+              <div style='width:230px;flex:none;font-family:"IBM Plex Mono",monospace;font-size:11px;
+                          color:{TEXT_DARK};text-align:right;'>
+                <b>{fmt_money_short(total)}</b>&nbsp;·&nbsp;
+                <span style='color:{COLOR_PURPLE};'>Inv {fmt_money_short(r["invoiced"])} ({invoiced_pct:.0f}%)</span>
+              </div>
+            </div>
+            """)
+ 
+        chart_html = "".join(rows_html)
+        st.markdown(
+            f"""
+            <div style='max-height:900px;overflow-y:auto;border:1px solid {GRID_LIGHT};
+                        border-radius:6px;padding:8px 0;background:#FFFFFF;'>
+              {chart_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.caption(
-            "Diamond marker = end of bar (Total) · colour = budget variance · "
-            "label shows Total and Invoiced value alongside % invoiced."
+            "Each bar's segments are proportional to that PID's own total (Remaining/Planned/Done/Invoiced) — "
+            "so proportions compare cleanly across very different PID sizes. Dot colour = budget variance. "
+            "Scroll for the full list."
         )
  
 # --------------------------------------------------------------------------
