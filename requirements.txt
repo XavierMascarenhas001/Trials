@@ -6,5 +6,6 @@ plotly
 pyarrow
 openpyxl
 streamlit-calendar
+pymupdf
 
 
