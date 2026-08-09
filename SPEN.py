@@ -1,6 +1,7 @@
  
 import datetime as dt
  
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -20,22 +21,29 @@ COLUMNS_NEEDED = [
     "district", "project", "project manager", "team", "team lider", "pid",
 ]
  
-COLOR_GREEN = "#4FBE84"
-COLOR_RED = "#E2604F"
-COLOR_AMBER = "#E3A64A"
-COLOR_TEAL = "#4FA6C9"
-COLOR_PURPLE = "#8C7AE6"
-COLOR_MUTED = "#4A5568"
+COLOR_GREEN = "#1E9E5A"      # positive variation
+COLOR_RED = "#D64545"        # negative variation
+COLOR_YELLOW = "#F0B429"     # materials
+COLOR_NAVY = "#1F3A5F"       # "the rest" / base (construction)
+COLOR_TEAL = "#2C7DA0"       # PID tab — total/remaining
+COLOR_AMBER = "#E0A02A"      # PID tab — planned
+COLOR_PURPLE = "#7C5CBF"     # PID tab — invoiced
+COLOR_MUTED = "#B7BFC9"
  
 CATEGORY_PALETTE = [
-    "#4FA6C9", "#E3A64A", "#8C7AE6", "#4FBE84", "#E2604F",
-    "#5DD5D0", "#C97ED9", "#B8C24A", "#E087A8", "#6B8CE6",
+    "#2C7DA0", "#E0A02A", "#7C5CBF", "#1E9E5A", "#D64545",
+    "#2F9E9E", "#A85CB0", "#7C8C2A", "#C25C82", "#4C6FC2",
 ]
  
-PLOTLY_DARK = dict(
-    paper_bgcolor="#131922",
-    plot_bgcolor="#131922",
-    font=dict(color="#E7ECF2", family="IBM Plex Mono, monospace", size=12),
+TEXT_DARK = "#1B2430"
+TEXT_MUTED = "#5B6B7C"
+GRID_LIGHT = "#E2E7ED"
+PANEL_BG = "#FFFFFF"
+ 
+PLOTLY_LIGHT = dict(
+    paper_bgcolor=PANEL_BG,
+    plot_bgcolor=PANEL_BG,
+    font=dict(color=TEXT_DARK, family="IBM Plex Mono, monospace", size=13),
     margin=dict(l=10, r=10, t=30, b=10),
 )
  
@@ -126,17 +134,28 @@ def bucket_label(ts: pd.Timestamp, granularity: str) -> str:
  
  
 def metric_row(items):
-    """items: list of (label, value_str, color_or_None)"""
+    """items: list of (label, value_str, accent_color_or_None, highlight_bool)"""
     cols = st.columns(len(items))
-    for col, (label, value, color) in zip(cols, items):
+    for col, (label, value, color, highlight) in zip(cols, items):
         with col:
-            style = f"color:{color};" if color else ""
+            if highlight:
+                box_bg = "#EAF3EC"
+                box_border = color or COLOR_NAVY
+                value_size = "26px"
+                label_color = TEXT_DARK
+                border_style = f"border:1px solid {box_border};border-left:5px solid {box_border};"
+            else:
+                box_bg = "#F6F8FA"
+                value_size = "18px"
+                label_color = TEXT_MUTED
+                border_style = "border:1px solid #DDE3E9;"
+            val_style = f"color:{color};" if color else f"color:{TEXT_DARK};"
             st.markdown(
                 f"""
-                <div style="border:1px solid #2A3442;border-radius:6px;padding:10px 14px;background:#0B0F14;">
+                <div style="{border_style}border-radius:6px;padding:10px 14px;background:{box_bg};">
                   <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;
-                              text-transform:uppercase;color:#7C8AA0;margin-bottom:4px;">{label}</div>
-                  <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;{style}">{value}</div>
+                              text-transform:uppercase;color:{label_color};margin-bottom:4px;">{label}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:{value_size};font-weight:700;{val_style}">{value}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -228,15 +247,17 @@ st.caption(
     f"grouping: {granularity}{' (auto)' if gran_choice == 'Auto' else ''}"
 )
  
-tab_trend, tab_pid = st.tabs(["📈 Trends", "📊 PID Breakdown"])
+tab_trend, tab_pid, tab_finance = st.tabs(["📈 Trends", "📊 PID Breakdown", "💰 Finance"])
  
 # --------------------------------------------------------------------------
 # TAB 1 — Trends
 # --------------------------------------------------------------------------
  
 with tab_trend:
-    st.subheader("Panel 01 — Total by Date (Construction)")
-    st.caption("Bar height = construction total · colour = variance vs original · label = material value")
+    st.subheader("Panel 01 — Total by Date (Construction + Materials)")
+    st.caption(
+        "Each bar = base (navy) + variance vs. original (red/green) + materials (yellow), stacked"
+    )
  
     construction = fdf_dated[fdf_dated["flag"] == "construction"].copy()
     material = fdf_dated[fdf_dated["flag"] == "material"].copy()
@@ -253,43 +274,57 @@ with tab_trend:
         chart_df = pd.merge(c_agg, m_agg, on="bucket", how="outer").fillna(0)
         chart_df = chart_df.sort_values("bucket")
         chart_df["variance"] = chart_df["total"] - chart_df["orig"]
-        chart_df["color"] = chart_df["variance"].apply(lambda v: COLOR_GREEN if v >= 0 else COLOR_RED)
+        # base = the smaller of total/orig ("the rest"); cap = the gap between them, coloured by sign
+        chart_df["base"] = chart_df[["total", "orig"]].min(axis=1)
+        chart_df["cap"] = chart_df["variance"].abs()
+        chart_df["cap_color"] = chart_df["variance"].apply(lambda v: COLOR_GREEN if v >= 0 else COLOR_RED)
         chart_df["label"] = chart_df["bucket"].apply(lambda ts: bucket_label(ts, granularity))
  
+        grand_total = chart_df["total"].sum() + chart_df["material"].sum()
+        var_sum = chart_df["variance"].sum()
+ 
         metric_row([
-            ("Total (construction)", fmt_money(chart_df["total"].sum()), None),
-            ("Original", fmt_money(chart_df["orig"].sum()), None),
-            ("Variance", fmt_money(chart_df["variance"].sum()),
-             COLOR_GREEN if chart_df["variance"].sum() >= 0 else COLOR_RED),
-            ("Materials", fmt_money(chart_df["material"].sum()), COLOR_AMBER),
+            ("Total (construction + materials)", fmt_money(grand_total), COLOR_NAVY, True),
+            ("Construction total", fmt_money(chart_df["total"].sum()), None, False),
+            ("Original", fmt_money(chart_df["orig"].sum()), None, False),
+            ("Variance", fmt_money(var_sum), COLOR_GREEN if var_sum >= 0 else COLOR_RED, False),
+            ("Materials", fmt_money(chart_df["material"].sum()), COLOR_YELLOW, False),
         ])
  
         fig = go.Figure()
+ 
         fig.add_trace(go.Bar(
-            x=chart_df["label"], y=chart_df["total"],
-            marker_color=chart_df["color"],
-            text=[fmt_money_short(v) if v else "" for v in chart_df["material"]],
-            textposition="outside",
-            textfont=dict(color=COLOR_AMBER, size=11),
-            name="Total",
-            customdata=chart_df[["orig", "variance", "material"]],
-            hovertemplate=(
-                "<b>%{x}</b><br>Total: £%{y:,.2f}<br>Original: £%{customdata[0]:,.2f}"
-                "<br>Variance: £%{customdata[1]:,.2f}<br>Materials: £%{customdata[2]:,.2f}<extra></extra>"
-            ),
+            x=chart_df["label"], y=chart_df["base"],
+            marker_color=COLOR_NAVY,
+            name="Base (original / the rest)",
+            customdata=chart_df[["total", "orig", "variance", "material"]],
+            hovertemplate="<b>%{x}</b><br>Base: £%{y:,.2f}<extra></extra>",
+        ))
+        fig.add_trace(go.Bar(
+            x=chart_df["label"], y=chart_df["cap"],
+            marker_color=chart_df["cap_color"],
+            name="Variance (total − original)",
+            hovertemplate="<b>%{x}</b><br>Variance: £%{y:,.2f}<extra></extra>",
             showlegend=False,
         ))
-        # dummy traces purely to build the 3-colour legend
-        fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_AMBER, name="Materials"))
-        fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_RED, name="Negative variation"))
+        fig.add_trace(go.Bar(
+            x=chart_df["label"], y=chart_df["material"],
+            marker_color=COLOR_YELLOW,
+            marker_line=dict(color="#B98600", width=0.6),
+            name="Materials",
+            hovertemplate="<b>%{x}</b><br>Materials: £%{y:,.2f}<extra></extra>",
+        ))
+        # dummy traces purely to add red/green to the legend (variance trace itself is colour-mixed)
         fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_GREEN, name="Positive variation"))
+        fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_RED, name="Negative variation"))
  
         fig.update_layout(
-            **PLOTLY_DARK,
-            height=380,
-            yaxis=dict(tickprefix="£", gridcolor="#1E2733", zeroline=False),
-            xaxis=dict(gridcolor="#1E2733"),
-            legend=dict(orientation="h", y=-0.18, bgcolor="rgba(0,0,0,0)"),
+            **PLOTLY_LIGHT,
+            height=400,
+            barmode="stack",
+            yaxis=dict(tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
+            xaxis=dict(gridcolor=GRID_LIGHT, tickfont=dict(size=12)),
+            legend=dict(orientation="h", y=-0.18, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
             bargap=0.25,
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -306,8 +341,9 @@ with tab_trend:
             .groupby("lider")["total"].sum()
             .sort_values(ascending=False)
         )
-        top_liders = list(totals_by_lider.index[:9])
-        has_other = len(totals_by_lider) > 9
+        TOP_N = 6
+        top_liders = list(totals_by_lider.index[:TOP_N])
+        has_other = len(totals_by_lider) > TOP_N
  
         construction["lider_grp"] = construction["team lider"].fillna("Unassigned")
         if has_other:
@@ -320,11 +356,16 @@ with tab_trend:
         color_map = {l: (COLOR_MUTED if l == "Other" else CATEGORY_PALETTE[i % len(CATEGORY_PALETTE)])
                      for i, l in enumerate(lider_order)}
  
+        def _short_name(name, n=16):
+            return name if len(name) <= n else name[:n - 1] + "…"
+ 
+        short_label = {l: (l if l == "Other" else _short_name(l)) for l in lider_order}
+ 
         var_sum = construction["total"].sum() - construction["orig"].sum()
         metric_row([
-            ("Total (construction)", fmt_money(construction["total"].sum()), None),
-            ("Original", fmt_money(construction["orig"].sum()), None),
-            ("Variance", fmt_money(var_sum), COLOR_GREEN if var_sum >= 0 else COLOR_RED),
+            ("Total (construction)", fmt_money(construction["total"].sum()), COLOR_NAVY, True),
+            ("Original", fmt_money(construction["orig"].sum()), None, False),
+            ("Variance", fmt_money(var_sum), COLOR_GREEN if var_sum >= 0 else COLOR_RED, False),
         ])
  
         fig2 = go.Figure()
@@ -333,20 +374,27 @@ with tab_trend:
             fig2.add_trace(go.Bar(
                 x=[bucket_label(ts, granularity) for ts in sub["bucket"]],
                 y=sub["total"],
-                name=l,
+                name=short_label[l],
                 marker_color=color_map[l],
                 hovertemplate=f"<b>{l}</b><br>%{{x}}<br>£%{{y:,.2f}}<extra></extra>",
             ))
         fig2.update_layout(
-            **PLOTLY_DARK,
-            height=360,
+            **PLOTLY_LIGHT,
+            height=380,
             barmode="stack",
-            yaxis=dict(tickprefix="£", gridcolor="#1E2733", zeroline=False),
-            xaxis=dict(gridcolor="#1E2733", categoryorder="category ascending"),
-            legend=dict(orientation="h", y=-0.22, bgcolor="rgba(0,0,0,0)"),
+            yaxis=dict(tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
+            xaxis=dict(gridcolor=GRID_LIGHT, categoryorder="category ascending", tickfont=dict(size=12)),
+            legend=dict(
+                orientation="h", y=-0.22, x=0.5, xanchor="center",
+                bgcolor="rgba(0,0,0,0)", font=dict(size=11), tracegroupgap=4,
+            ),
             bargap=0.25,
         )
         st.plotly_chart(fig2, use_container_width=True)
+        if has_other:
+            st.caption(
+                "Top " + str(TOP_N) + " team leaders shown individually — the rest are grouped under **Other**."
+            )
  
 # --------------------------------------------------------------------------
 # TAB 2 — PID Breakdown
@@ -354,7 +402,7 @@ with tab_trend:
  
 with tab_pid:
     st.subheader("Panel 03 — PID Breakdown")
-    st.caption("Grouped by district → project → PID → project manager → most common job line")
+    st.caption("District → Project → PID, one bar per PID · ordered by total value, highest first")
  
     mc_mode = st.radio("Show", ["All", "Construction", "Material"], horizontal=True)
  
@@ -369,64 +417,288 @@ with tab_pid:
         pdf["has_done"] = pdf["done"].notna()
         pdf["has_inv"] = pdf["invoice date"].notna()
  
+        # mutually exclusive progress stage per row, so the four segments sum exactly to "total"
+        pdf["stage"] = np.select(
+            [pdf["has_inv"], pdf["has_done"], pdf["has_plan"]],
+            ["invoiced", "done", "planned"],
+            default="remaining",
+        )
+ 
         group_cols = ["district", "project", "pid", "project manager"]
  
         def _job_mode(s):
             m = s.mode()
             return m.iloc[0] if not m.empty else None
  
-        agg = pdf.groupby(group_cols, dropna=False).apply(
-            lambda g: pd.Series({
-                "total": g["total"].sum(),
-                "planned": g.loc[g["has_plan"], "total"].sum(),
-                "done": g.loc[g["has_done"], "total"].sum(),
-                "invoiced": g.loc[g["has_inv"], "total"].sum(),
-                "job": _job_mode(g["job"]),
-            })
+        base = pdf.groupby(group_cols, dropna=False).agg(
+            total=("total", "sum"), job=("job", _job_mode)
         ).reset_index()
  
-        agg = agg.sort_values(["district", "project", "pid"])
-        agg["row_label"] = (
-            agg["district"].fillna("—") + " · " + agg["project"].fillna("—") + " · " +
-            agg["pid"].fillna("—") + " · " + agg["project manager"].fillna("—") + " · " +
-            agg["job"].fillna("").str.slice(0, 45)
+        stage_sums = pdf.groupby(group_cols + ["stage"], dropna=False)["total"].sum().unstack("stage", fill_value=0)
+        for s in ["remaining", "planned", "done", "invoiced"]:
+            if s not in stage_sums.columns:
+                stage_sums[s] = 0.0
+        stage_sums = stage_sums.reset_index()
+ 
+        agg = base.merge(stage_sums, on=group_cols, how="left").fillna(0)
+ 
+        # order: district money desc -> project money desc (within district) -> pid money desc (within project)
+        agg["district_total"] = agg.groupby("district")["total"].transform("sum")
+        agg["project_total"] = agg.groupby(["district", "project"])["total"].transform("sum")
+        agg = agg.sort_values(
+            ["district_total", "project_total", "total"], ascending=[False, False, False]
         )
+ 
+        def _short(s, n):
+            s = s or ""
+            return s if len(s) <= n else s[: n - 1] + "…"
+ 
+        agg["leaf_label"] = agg["pid"] + " · " + agg["job"].fillna("").apply(lambda j: _short(j, 42))
  
         metric_row([
-            ("Total", fmt_money(agg["total"].sum()), COLOR_TEAL),
-            ("Planned", fmt_money(agg["planned"].sum()), COLOR_AMBER),
-            ("Done", fmt_money(agg["done"].sum()), COLOR_GREEN),
-            ("Invoiced", fmt_money(agg["invoiced"].sum()), COLOR_PURPLE),
+            ("Total", fmt_money(agg["total"].sum()), COLOR_NAVY, True),
+            ("Remaining", fmt_money(agg["remaining"].sum()), COLOR_MUTED, False),
+            ("Planned", fmt_money(agg["planned"].sum()), COLOR_AMBER, False),
+            ("Done", fmt_money(agg["done"].sum()), COLOR_GREEN, False),
+            ("Invoiced", fmt_money(agg["invoiced"].sum()), COLOR_PURPLE, False),
         ])
-        st.caption(f"{len(agg)} PID(s) in view")
+        st.caption(f"{len(agg)} PID(s) in view — segments are mutually exclusive and sum to Total")
  
-        row_h = 26
+        y_levels = [
+            agg["district"].fillna("Unassigned").tolist(),
+            agg["project"].fillna("Unassigned").tolist(),
+            agg["leaf_label"].tolist(),
+        ]
+        hover_pm = agg["project manager"].fillna("—")
+        hover_job = agg["job"].fillna("")
+ 
+        STAGES = [
+            ("remaining", "Remaining", COLOR_MUTED),
+            ("planned", "Planned", COLOR_AMBER),
+            ("done", "Done", COLOR_GREEN),
+            ("invoiced", "Invoiced", COLOR_PURPLE),
+        ]
+ 
         fig3 = go.Figure()
-        y = agg["row_label"][::-1]
-        fig3.add_trace(go.Bar(y=y, x=agg["total"][::-1], name="Total", orientation="h",
-                               marker_color=COLOR_TEAL,
-                               hovertemplate="Total: £%{x:,.2f}<extra></extra>"))
-        fig3.add_trace(go.Bar(y=y, x=agg["planned"][::-1], name="Planned", orientation="h",
-                               marker_color=COLOR_AMBER,
-                               hovertemplate="Planned: £%{x:,.2f}<extra></extra>"))
-        fig3.add_trace(go.Bar(y=y, x=agg["done"][::-1], name="Done", orientation="h",
-                               marker_color=COLOR_GREEN,
-                               hovertemplate="Done: £%{x:,.2f}<extra></extra>"))
-        fig3.add_trace(go.Bar(y=y, x=agg["invoiced"][::-1], name="Invoiced", orientation="h",
-                               marker_color=COLOR_PURPLE,
-                               hovertemplate="Invoiced: £%{x:,.2f}<extra></extra>"))
+        for col, label, color in STAGES:
+            vals = agg[col]
+            fig3.add_trace(go.Bar(
+                y=y_levels, x=vals, name=label, orientation="h",
+                marker_color=color,
+                text=[fmt_money_short(v) if v >= 1 else "" for v in vals],
+                textposition="inside",
+                insidetextanchor="middle",
+                textfont=dict(size=10, color="#FFFFFF"),
+                customdata=list(zip(hover_pm, hover_job)),
+                hovertemplate=(
+                    f"<b>{label}</b>: £%{{x:,.2f}}<br>PM: %{{customdata[0]}}<br>Job: %{{customdata[1]}}<extra></extra>"
+                ),
+            ))
  
+        row_h = 30
         fig3.update_layout(
-            **PLOTLY_DARK,
-            height=max(320, row_h * len(agg) * 4 * 0.28),
-            barmode="group",
-            xaxis=dict(tickprefix="£", gridcolor="#1E2733", zeroline=False),
-            yaxis=dict(gridcolor="#1E2733", automargin=True, tickfont=dict(size=10)),
-            legend=dict(orientation="h", y=1.05, bgcolor="rgba(0,0,0,0)"),
-            bargap=0.2,
-            bargroupgap=0.1,
+            **PLOTLY_LIGHT,
+            height=max(420, row_h * len(agg) + 140),
+            barmode="stack",
+            xaxis=dict(tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
+            yaxis=dict(
+                gridcolor=GRID_LIGHT, automargin=True, tickfont=dict(size=13),
+                autorange="reversed",
+            ),
+            legend=dict(orientation="h", y=1.04, x=0.5, xanchor="center", bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
+            bargap=0.28,
+            font=dict(size=13),
         )
         st.plotly_chart(fig3, use_container_width=True)
+ 
+# --------------------------------------------------------------------------
+# TAB 3 — Finance
+# --------------------------------------------------------------------------
+ 
+with tab_finance:
+    st.subheader("Panel 04 — Financial Health")
+    st.caption("Budget performance, billing pipeline & invoicing speed · same filters as above")
+ 
+    fin = fdf_dated.copy()
+    fin_c = fin[fin["flag"] == "construction"].copy()
+    fin_m = fin[fin["flag"] == "material"].copy()
+ 
+    if fin.empty:
+        st.info("No records under these filters. Widen the date range or clear a filter.")
+    else:
+        fin["has_plan"] = fin["plan1"].notna()
+        fin["has_done"] = fin["done"].notna()
+        fin["has_inv"] = fin["invoice date"].notna()
+ 
+        total_value = fin["total"].sum()
+        orig_value = fin_c["orig"].sum()
+        variance = fin_c["total"].sum() - orig_value
+        variance_pct = (variance / orig_value * 100) if orig_value else 0.0
+ 
+        invoiced_sum = fin.loc[fin["has_inv"], "total"].sum()
+        wip_sum = fin.loc[fin["has_done"] & ~fin["has_inv"], "total"].sum()          # earned, not yet billed
+        backlog_sum = fin.loc[~fin["has_done"], "total"].sum()                        # not yet completed
+        invoiced_pct = (invoiced_sum / total_value * 100) if total_value else 0.0
+        material_pct = (fin_m["total"].sum() / total_value * 100) if total_value else 0.0
+ 
+        # ---- KPI row 1 : budget performance ----
+        metric_row([
+            ("Total Value", fmt_money(total_value), COLOR_NAVY, True),
+            ("Original Budget", fmt_money(orig_value), None, False),
+            ("Variance", fmt_money(variance), COLOR_GREEN if variance >= 0 else COLOR_RED, False),
+            ("Variance %", f"{variance_pct:+.2f}%", COLOR_GREEN if variance_pct >= 0 else COLOR_RED, False),
+        ])
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        # ---- KPI row 2 : cash / pipeline ----
+        metric_row([
+            ("Invoiced", fmt_money(invoiced_sum) + f"  ({invoiced_pct:.1f}%)", COLOR_PURPLE, False),
+            ("WIP — done, not invoiced", fmt_money(wip_sum), COLOR_GREEN, False),
+            ("Backlog — not yet done", fmt_money(backlog_sum), COLOR_MUTED, False),
+            ("Material share", f"{material_pct:.1f}%", COLOR_YELLOW, False),
+        ])
+ 
+        st.markdown("---")
+ 
+        col_a, col_b = st.columns(2)
+ 
+        # ---- Billing pipeline (single stacked bar) ----
+        with col_a:
+            st.markdown("**Billing pipeline**")
+            st.caption("Where the total value currently sits, end to end")
+ 
+            stage_vals = pd.Series({
+                "Remaining\n(not started)": fin.loc[~fin["has_plan"], "total"].sum(),
+                "Planned\n(not done)": fin.loc[fin["has_plan"] & ~fin["has_done"], "total"].sum(),
+                "Done\n(not invoiced)": wip_sum,
+                "Invoiced": invoiced_sum,
+            })
+            pipe_colors = [COLOR_MUTED, COLOR_AMBER, COLOR_GREEN, COLOR_PURPLE]
+ 
+            fig4 = go.Figure()
+            for stage, val, color in zip(stage_vals.index, stage_vals.values, pipe_colors):
+                fig4.add_trace(go.Bar(
+                    y=["Value"], x=[val], name=stage.replace("\n", " "), orientation="h",
+                    marker_color=color,
+                    text=[fmt_money_short(val)], textposition="inside", textfont=dict(color="#fff", size=12),
+                    hovertemplate=f"<b>{stage.replace(chr(10),' ')}</b>: £%{{x:,.2f}}<extra></extra>",
+                ))
+            fig4.update_layout(
+                **PLOTLY_LIGHT,
+                height=180,
+                barmode="stack",
+                xaxis=dict(tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
+                yaxis=dict(visible=False),
+                legend=dict(orientation="h", y=-0.35, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                margin=dict(l=10, r=10, t=10, b=10),
+            )
+            st.plotly_chart(fig4, use_container_width=True)
+ 
+        # ---- Invoicing lag ----
+        with col_b:
+            st.markdown("**Invoicing speed**")
+            st.caption("Days between job marked *done* and *invoiced*")
+ 
+            lag_df = fin[fin["has_done"] & fin["has_inv"]].copy()
+            lag_df["lag_days"] = (lag_df["invoice date"] - lag_df["done"]).dt.days
+            lag_df = lag_df[(lag_df["lag_days"] >= 0) & (lag_df["lag_days"] <= 365)]
+ 
+            if lag_df.empty:
+                st.info("Not enough done + invoiced pairs under these filters to measure lag.")
+            else:
+                med_lag = lag_df["lag_days"].median()
+                mean_lag = lag_df["lag_days"].mean()
+                st.markdown(
+                    f"<span style='font-family:\"IBM Plex Mono\",monospace;font-size:13px;color:{TEXT_DARK};'>"
+                    f"Median: <b>{med_lag:.0f} days</b> &nbsp;·&nbsp; Average: <b>{mean_lag:.0f} days</b> "
+                    f"&nbsp;·&nbsp; n={len(lag_df):,}</span>",
+                    unsafe_allow_html=True,
+                )
+                fig5 = go.Figure()
+                fig5.add_trace(go.Histogram(
+                    x=lag_df["lag_days"], nbinsx=30, marker_color=COLOR_TEAL,
+                    hovertemplate="%{x} days<br>%{y} jobs<extra></extra>",
+                ))
+                fig5.add_vline(x=med_lag, line_dash="dash", line_color=COLOR_RED,
+                                annotation_text="median", annotation_font_size=11)
+                fig5.update_layout(
+                    **PLOTLY_LIGHT,
+                    height=180,
+                    xaxis=dict(title="Days", gridcolor=GRID_LIGHT, tickfont=dict(size=11)),
+                    yaxis=dict(title="Jobs", gridcolor=GRID_LIGHT, tickfont=dict(size=11)),
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    bargap=0.1,
+                )
+                st.plotly_chart(fig5, use_container_width=True)
+ 
+        st.markdown("---")
+        st.markdown("**Variance by project**")
+        st.caption("Construction total vs. original budget, worst to best")
+ 
+        proj_var = fin_c.groupby("project", dropna=False).agg(total=("total", "sum"), orig=("orig", "sum"))
+        proj_var = proj_var[proj_var["orig"] != 0]
+        proj_var["variance"] = proj_var["total"] - proj_var["orig"]
+        proj_var["variance_pct"] = proj_var["variance"] / proj_var["orig"] * 100
+        proj_var = proj_var.sort_values("variance_pct")
+ 
+        if proj_var.empty:
+            st.info("No projects with a non-zero original budget under these filters.")
+        else:
+            fig6 = go.Figure()
+            fig6.add_trace(go.Bar(
+                y=proj_var.index.fillna("Unassigned"), x=proj_var["variance_pct"], orientation="h",
+                marker_color=[COLOR_GREEN if v >= 0 else COLOR_RED for v in proj_var["variance_pct"]],
+                text=[f"{v:+.1f}%" for v in proj_var["variance_pct"]],
+                textposition="outside", textfont=dict(size=12),
+                customdata=proj_var[["total", "orig", "variance"]],
+                hovertemplate=(
+                    "<b>%{y}</b><br>Total: £%{customdata[0]:,.2f}<br>Original: £%{customdata[1]:,.2f}"
+                    "<br>Variance: £%{customdata[2]:,.2f} (%{x:+.1f}%)<extra></extra>"
+                ),
+            ))
+            fig6.update_layout(
+                **PLOTLY_LIGHT,
+                height=max(220, 42 * len(proj_var) + 60),
+                xaxis=dict(title="Variance %", gridcolor=GRID_LIGHT, zeroline=True, zerolinecolor="#B9C2CC", tickfont=dict(size=12)),
+                yaxis=dict(gridcolor=GRID_LIGHT, tickfont=dict(size=13), automargin=True),
+                margin=dict(l=10, r=40, t=10, b=10),
+            )
+            st.plotly_chart(fig6, use_container_width=True)
+ 
+        st.markdown("---")
+        st.markdown("**PID variance leaderboard**")
+        st.caption("Largest overruns and largest underspends, by £ variance (construction only)")
+ 
+        pid_var = fin_c.dropna(subset=["pid"]).groupby(
+            ["pid", "district", "project"], dropna=False
+        ).agg(total=("total", "sum"), orig=("orig", "sum")).reset_index()
+        pid_var = pid_var[pid_var["orig"] != 0]
+        pid_var["variance"] = pid_var["total"] - pid_var["orig"]
+        pid_var["variance_pct"] = pid_var["variance"] / pid_var["orig"] * 100
+ 
+        if pid_var.empty:
+            st.info("No PIDs with a non-zero original budget under these filters.")
+        else:
+            lead_a, lead_b = st.columns(2)
+            with lead_a:
+                st.markdown(f"<span style='color:{COLOR_RED};font-weight:700;'>Top overruns</span>", unsafe_allow_html=True)
+                worst = pid_var.sort_values("variance").head(8).copy()
+                worst["Variance"] = worst["variance"].apply(fmt_money)
+                worst["Variance %"] = worst["variance_pct"].apply(lambda v: f"{v:+.1f}%")
+                st.dataframe(
+                    worst[["pid", "district", "project", "Variance", "Variance %"]]
+                    .rename(columns={"pid": "PID", "district": "District", "project": "Project"}),
+                    hide_index=True, use_container_width=True,
+                )
+            with lead_b:
+                st.markdown(f"<span style='color:{COLOR_GREEN};font-weight:700;'>Top underspends</span>", unsafe_allow_html=True)
+                best = pid_var.sort_values("variance", ascending=False).head(8).copy()
+                best["Variance"] = best["variance"].apply(fmt_money)
+                best["Variance %"] = best["variance_pct"].apply(lambda v: f"{v:+.1f}%")
+                st.dataframe(
+                    best[["pid", "district", "project", "Variance", "Variance %"]]
+                    .rename(columns={"pid": "PID", "district": "District", "project": "Project"}),
+                    hide_index=True, use_container_width=True,
+                )
  
 st.markdown("---")
 st.caption(f"Master Control Dashboard — data as of {date_max.date()}")
