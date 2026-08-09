@@ -440,43 +440,49 @@ with tab_pid:
             default="remaining",
         )
  
-        group_cols = ["district", "project", "pid", "project manager"]
- 
-        def _job_mode(s):
+        def _mode(s):
             m = s.mode()
             return m.iloc[0] if not m.empty else None
  
-        base = pdf.groupby(group_cols, dropna=False).agg(
-            total=("total", "sum"), job=("job", _job_mode)
+        # group by PID alone so every PID gets exactly one row/bar — a PID that touched more
+        # than one district/project/PM in the raw data is attributed to its most common one
+        base = pdf.groupby("pid", dropna=False).agg(
+            total=("total", "sum"),
+            job=("job", _mode),
+            district=("district", _mode),
+            project=("project", _mode),
+            pm=("project manager", _mode),
         ).reset_index()
  
-        stage_sums = pdf.groupby(group_cols + ["stage"], dropna=False)["total"].sum().unstack("stage", fill_value=0)
+        stage_sums = pdf.groupby(["pid", "stage"], dropna=False)["total"].sum().unstack("stage", fill_value=0)
         for s in ["remaining", "planned", "done", "invoiced"]:
             if s not in stage_sums.columns:
                 stage_sums[s] = 0.0
         stage_sums = stage_sums.reset_index()
  
-        agg = base.merge(stage_sums, on=group_cols, how="left").fillna(0)
+        agg = base.merge(stage_sums, on="pid", how="left").fillna(0)
  
         # variance always reflects construction budget (total vs original), independent of the Show toggle
         var_src = fdf.dropna(subset=["pid"])
         var_src = var_src[var_src["flag"] == "construction"]
-        var_agg = var_src.groupby(group_cols, dropna=False).agg(
+        var_agg = var_src.groupby("pid", dropna=False).agg(
             c_total=("total", "sum"), c_orig=("orig", "sum")
         ).reset_index()
         var_agg["variance"] = var_agg["c_total"] - var_agg["c_orig"]
-        agg = agg.merge(var_agg[group_cols + ["variance"]], on=group_cols, how="left").fillna({"variance": 0.0})
+        agg = agg.merge(var_agg[["pid", "variance"]], on="pid", how="left").fillna({"variance": 0.0})
+ 
+        assert agg["pid"].is_unique  # one row = one bar, guaranteed
  
         # order: district money desc -> project money desc -> project manager money desc -> pid money desc
         agg["district_total"] = agg.groupby("district")["total"].transform("sum")
         agg["project_total"] = agg.groupby(["district", "project"])["total"].transform("sum")
-        agg["pm_total"] = agg.groupby(["district", "project", "project manager"])["total"].transform("sum")
+        agg["pm_total"] = agg.groupby(["district", "project", "pm"])["total"].transform("sum")
         agg = agg.sort_values(
             ["district_total", "project_total", "pm_total", "total"],
             ascending=[False, False, False, False],
         )
  
-        agg["pm_label"] = agg["project manager"].fillna("Unassigned")
+        agg["pm_label"] = agg["pm"].fillna("Unassigned")
         agg["district_label"] = agg["district"].fillna("Unassigned")
         agg["project_label"] = agg["project"].fillna("Unassigned")
  
@@ -520,15 +526,15 @@ with tab_pid:
  
         # end-of-bar marker + label: evidences Total and Invoiced right where the bar ends,
         # marker colour carries the variance sign (green = under/at budget, red = over budget)
-        var_colors = [COLOR_GREEN if v >= 0 else COLOR_RED for v in agg["variance"]]
         invoiced_pct = np.where(agg["total"] > 0, agg["invoiced"] / agg["total"] * 100, 0.0)
         end_labels = [
             f"<b>Total {fmt_money_short(t)}</b>  ·  Invoiced {fmt_money_short(iv)} ({p:.0f}%)"
             for t, iv, p in zip(agg["total"], agg["invoiced"], invoiced_pct)
         ]
+ 
+        # end-of-bar label (text only, no markers here — markers come from the two traces below)
         fig3.add_trace(go.Scatter(
-            x=agg["total"], y=y_levels, mode="markers+text",
-            marker=dict(symbol="diamond", size=8, color=var_colors, line=dict(width=1, color="#FFFFFF")),
+            x=agg["total"], y=y_levels, mode="text",
             text=end_labels,
             textposition="middle right",
             textfont=dict(size=11, color=TEXT_DARK, family="IBM Plex Mono, monospace"),
@@ -537,11 +543,23 @@ with tab_pid:
             showlegend=False,
             cliponaxis=False,
         ))
-        # dummy traces purely to add red/green variance to the legend
-        fig3.add_trace(go.Bar(x=[None], y=[[None], [None], [None], [None]], orientation="h",
-                               marker_color=COLOR_GREEN, name="At/under budget (variance ≥ 0)"))
-        fig3.add_trace(go.Bar(x=[None], y=[[None], [None], [None], [None]], orientation="h",
-                               marker_color=COLOR_RED, name="Over budget (variance < 0)"))
+ 
+        # variance markers, split into two real (correctly-shaped) traces so the legend is accurate
+        # and every trace on this multicategory axis carries a consistent per-level array length
+        def _filter_levels(levels, mask):
+            return [[v for v, m in zip(lvl, mask) if m] for lvl in levels]
+ 
+        pos_mask = (agg["variance"] >= 0).to_numpy()
+        neg_mask = ~pos_mask
+        for mask, label, color in [(pos_mask, "At/under budget (variance ≥ 0)", COLOR_GREEN),
+                                    (neg_mask, "Over budget (variance < 0)", COLOR_RED)]:
+            if mask.any():
+                fig3.add_trace(go.Scatter(
+                    x=agg["total"][mask], y=_filter_levels(y_levels, mask),
+                    mode="markers",
+                    marker=dict(symbol="diamond", size=8, color=color, line=dict(width=1, color="#FFFFFF")),
+                    name=label, hoverinfo="skip",
+                ))
  
         n_pid = len(agg)
         row_h = 24
@@ -760,3 +778,4 @@ with tab_finance:
  
 st.markdown("---")
 st.caption(f"Master Control Dashboard — data as of {date_max.date()}")
+ 
