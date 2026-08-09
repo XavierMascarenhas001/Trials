@@ -40,16 +40,16 @@ def _unc_to_file_uri(path: str) -> str:
     return "file:///" + p.lstrip("/")  # local drive: file:///C:/...
  
  
-def _resolve_hyperlink_target(target: str) -> str:
+def _resolve_hyperlink_path(target: str) -> str:
     """Hyperlink targets in this workbook are usually relative to the
     workbook's own folder (e.g. '2026/08 - August/...'), but some are
-    already a full UNC path - handle both."""
+    already a full UNC path - handle both. Returns a raw Windows/UNC path
+    (not a file:// URI) - this is what os.path/os.listdir need to actually
+    read the folder on an internal server with network access."""
     decoded = unquote(target)
     if decoded.startswith("\\\\") or decoded.startswith("//"):
-        full_path = os.path.normpath(decoded)
-    else:
-        full_path = os.path.normpath(os.path.join(OUTAGE_BASE_DIR, decoded))
-    return _unc_to_file_uri(full_path)
+        return os.path.normpath(decoded)
+    return os.path.normpath(os.path.join(OUTAGE_BASE_DIR, decoded))
  
  
 def _extract_column_hyperlinks(file_bytes: bytes, sheet_name: str, column_letter: str) -> dict:
@@ -108,6 +108,92 @@ def _extract_column_hyperlinks(file_bytes: bytes, sheet_name: str, column_letter
         return {}
  
  
+# ============================================================
+# OUTAGE MAP PDFs (workpack zone PDFs + PowerOn Diagram) - reads directly
+# off the network share, so this ONLY works when the app is hosted on a
+# machine with real network access to \\gaeltec-gl\... (i.e. internal
+# hosting, not Streamlit Community Cloud). It fails gracefully otherwise -
+# os.path.isdir() just returns False and we show a message instead of
+# crashing.
+# ============================================================
+POWERON_DIAGRAM_PREFIX = "poweron diagram"
+WORKPACK_ZONES_MATCH = ("workpack", "zone")  # folder name must contain both, case-insensitive
+MAX_PDF_PAGES_PER_FILE = 5   # cap so one huge PDF can't blow up render time
+PDF_RENDER_ZOOM = 2.0        # ~144 DPI equivalent (72 * zoom) - good enough for on-screen maps
+ 
+ 
+def _render_pdf_pages_as_png(pdf_bytes: bytes, max_pages: int = MAX_PDF_PAGES_PER_FILE):
+    """Rasterizes up to max_pages of a PDF to PNG bytes using PyMuPDF (fitz).
+    Returns a list of PNG bytes - empty list on any failure (corrupt PDF,
+    password-protected, etc.) rather than raising."""
+    import fitz  # PyMuPDF - imported lazily so the app still loads if it's
+                 # not installed yet on machines that haven't picked up the
+                 # updated requirements.txt
+    images = []
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        mat = fitz.Matrix(PDF_RENDER_ZOOM, PDF_RENDER_ZOOM)
+        for i, page in enumerate(doc):
+            if i >= max_pages:
+                break
+            pix = page.get_pixmap(matrix=mat)
+            images.append(pix.tobytes("png"))
+        doc.close()
+    except Exception:
+        return []
+    return images
+ 
+ 
+@st.cache_data(show_spinner="Loading maps for this outage...", max_entries=20)
+def load_outage_maps(folder_path: str, cache_bust: str):
+    """Looks in the outage's folder for a 'PowerOn Diagram*.pdf' file and any
+    PDFs inside a 'workpack zone(s)' subfolder, and rasterizes each to PNG
+    pages for inline display. cache_bust exists purely so the cache key can
+    be forced to change (e.g. pass today's date) without needing real file
+    mtimes, which are awkward to get consistently across a whole folder.
+ 
+    Returns (list of (filename, [png_bytes, ...]), error_message). Never
+    raises - not being able to reach the folder (e.g. still on Streamlit
+    Cloud, or a VPN hiccup) shows a clean message, not a crash."""
+    if not folder_path:
+        return [], "No folder linked for this outage."
+    try:
+        if not os.path.isdir(folder_path):
+            return [], f"Folder not reachable from this server: {folder_path}"
+ 
+        results = []
+ 
+        # PowerOn Diagram PDF, directly inside the outage folder
+        for name in sorted(os.listdir(folder_path)):
+            full = os.path.join(folder_path, name)
+            if (
+                os.path.isfile(full)
+                and name.lower().startswith(POWERON_DIAGRAM_PREFIX)
+                and name.lower().endswith(".pdf")
+            ):
+                with open(full, "rb") as fh:
+                    pages = _render_pdf_pages_as_png(fh.read())
+                if pages:
+                    results.append((name, pages))
+ 
+        # PDFs inside a "workpack zone(s)" subfolder
+        for name in sorted(os.listdir(folder_path)):
+            full = os.path.join(folder_path, name)
+            lname = name.lower()
+            if os.path.isdir(full) and all(k in lname for k in WORKPACK_ZONES_MATCH):
+                for sub_name in sorted(os.listdir(full)):
+                    if sub_name.lower().endswith(".pdf"):
+                        sub_full = os.path.join(full, sub_name)
+                        with open(sub_full, "rb") as fh:
+                            pages = _render_pdf_pages_as_png(fh.read())
+                        if pages:
+                            results.append((sub_name, pages))
+ 
+        return results, None
+    except Exception as e:
+        return [], str(e)
+ 
+ 
 @st.cache_data(show_spinner="Reading outage programme...", max_entries=3)
 def load_outage_programme(file_bytes: bytes):
     """Cached on the uploaded file's bytes - re-parses only when a
@@ -141,8 +227,13 @@ def load_outage_programme(file_bytes: bytes):
         # data starts at Excel row 8, and df's index (preserved through dropna)
         # is 0-based from the first data row, so excel_row = index + 8
         link_targets = _extract_column_hyperlinks(file_bytes, "2026", "F")
-        df["Link"] = [link_targets.get(idx + 8) for idx in df.index]
-        df["Link"] = df["Link"].apply(lambda t: _resolve_hyperlink_target(t) if isinstance(t, str) else None)
+        raw_targets = [link_targets.get(idx + 8) for idx in df.index]
+        # FolderPath: raw Windows/UNC path - needed by os.listdir to actually read
+        # the folder (only works when the app itself has network access to the
+        # share, i.e. hosted internally). Link: file:// URI built from the same
+        # path, used only for the "Open in Explorer" button.
+        df["FolderPath"] = [_resolve_hyperlink_path(t) if isinstance(t, str) else None for t in raw_targets]
+        df["Link"] = df["FolderPath"].apply(lambda p: _unc_to_file_uri(p) if isinstance(p, str) else None)
  
         return df, None
     except Exception as e:
@@ -894,9 +985,10 @@ with tab_jobs:
             districts = cal_df["District"].tolist()
             schemes = cal_df["Scheme"].tolist()
             links = cal_df["Link"].tolist()
+            folder_paths = cal_df["FolderPath"].tolist()
  
             events = []
-            for start, district, scheme, link in zip(starts, districts, schemes, links):
+            for start, district, scheme, link, folder_path in zip(starts, districts, schemes, links, folder_paths):
                 d_str = "" if pd.isna(district) else str(district)
                 s_str = "" if pd.isna(scheme) else str(scheme)
                 has_link = isinstance(link, str) and link
@@ -910,14 +1002,17 @@ with tab_jobs:
                     "allDay": True,
                     "backgroundColor": color,
                     "borderColor": color,
-                    # Only field beyond the basics - kept deliberately minimal so the
-                    # click payload stays small. FullCalendar's own "url" click-to-open
-                    # doesn't work reliably here: browsers block file:// UNC navigation
-                    # from inside a component's embedded iframe as a security measure,
-                    # regardless of what we set. The reliable fix is rendering the link
-                    # as a real button on Streamlit's own page (outside that iframe),
+                    # Kept deliberately minimal so the click payload stays small.
+                    # FullCalendar's own "url" click-to-open doesn't work reliably
+                    # here: browsers block file:// UNC navigation from inside a
+                    # component's embedded iframe as a security measure, regardless
+                    # of what we set. The reliable fix is rendering the link as a
+                    # real button on Streamlit's own page (outside that iframe),
                     # which is what the eventClick capture below is for.
-                    "extendedProps": {"link": link if has_link else None},
+                    "extendedProps": {
+                        "link": link if has_link else None,
+                        "folder_path": folder_path if has_link else None,
+                    },
                 }
                 events.append(event)
  
@@ -946,22 +1041,48 @@ with tab_jobs:
                 callbacks=["eventClick"],
                 key="outage_calendar",
             )
-            st.caption("📎 = has a linked folder. Click it, then use the button below to open it.")
+            st.caption("📎 = has a linked folder. Click it to open the folder and view its maps below.")
  
             if cal_state and cal_state.get("callback") == "eventClick":
                 clicked = cal_state["eventClick"]["event"]
-                link = clicked.get("extendedProps", {}).get("link")
+                props = clicked.get("extendedProps", {})
+                link = props.get("link")
+                folder_path = props.get("folder_path")
+                clean_title = clicked.get("title", "outage").lstrip("📎 ")
+ 
                 if link:
                     st.markdown(
                         f'<a href="{link}" target="_blank" rel="noopener" '
                         f'style="display:inline-block; padding:6px 14px; background:#2563eb; '
                         f'color:white; border-radius:6px; text-decoration:none; font-weight:600;">'
-                        f'📂 Open: {clicked.get("title", "outage").lstrip("📎 ")}</a>',
+                        f'📂 Open: {clean_title}</a>',
                         unsafe_allow_html=True,
                     )
                     st.caption("Opens in a new tab as a local/network file link - works when your browser and OS allow file:// links to that network share.")
+ 
+                    st.markdown(f"**Maps for {clean_title}**")
+                    # cache_bust=today's date - refreshes the render once a day rather
+                    # than on every click, while still picking up new/changed PDFs
+                    # without needing per-file mtimes.
+                    maps, maps_err = load_outage_maps(folder_path, datetime.now().strftime("%Y-%m-%d"))
+                    if maps_err:
+                        st.caption(
+                            f"Maps not available: {maps_err}\n\n"
+                            "This needs the app to be running on a machine with network access "
+                            "to that share (internal hosting) - it won't work on Streamlit Cloud."
+                        )
+                    elif not maps:
+                        st.caption("No 'PowerOn Diagram' PDF or 'workpack zone' PDFs found in that folder.")
+                    else:
+                        for pdf_name, pages in maps:
+                            st.caption(pdf_name)
+                            map_cols = st.columns(min(len(pages), 3))
+                            for i, png_bytes in enumerate(pages):
+                                with map_cols[i % len(map_cols)]:
+                                    st.image(png_bytes, use_container_width=True, caption=f"Page {i + 1}" if len(pages) > 1 else None)
                 else:
-                    st.caption(f"**{clicked.get('title', 'Outage')}** has no linked folder.")
+                    st.caption(f"**{clean_title}** has no linked folder.")
+ 
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
