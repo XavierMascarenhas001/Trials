@@ -418,7 +418,7 @@ with tab_trend:
  
 with tab_pid:
     st.subheader("Panel 03 — PID Breakdown")
-    st.caption("District → Project → Project Manager → PID, one column per PID · ordered by total value, highest first")
+    st.caption("District → Project → Project Manager → PID, one bar per PID · ordered by total value, highest first")
  
     mc_mode = st.radio("Show", ["All", "Construction", "Material"], horizontal=True)
  
@@ -491,7 +491,7 @@ with tab_pid:
         ])
         st.caption(f"{len(agg)} PID(s) in view — Remaining/Planned/Done/Invoiced sum to Total; Variance is total vs. original budget")
  
-        x_levels = [
+        y_levels = [
             agg["district_label"].tolist(),
             agg["project_label"].tolist(),
             agg["pm_label"].tolist(),
@@ -510,59 +510,64 @@ with tab_pid:
         for col, label, color in STAGES:
             vals = agg[col]
             fig3.add_trace(go.Bar(
-                x=x_levels, y=vals, name=label,
+                y=y_levels, x=vals, name=label, orientation="h",
                 marker_color=color,
-                text=[fmt_money_short(v) if v >= 1 else "" for v in vals],
-                textposition="inside",
-                insidetextanchor="middle",
-                textfont=dict(size=9, color="#FFFFFF"),
                 customdata=hover_job,
                 hovertemplate=(
-                    f"<b>{label}</b>: £%{{y:,.2f}}<br>Job: %{{customdata}}<extra></extra>"
+                    f"<b>{label}</b>: £%{{x:,.2f}}<br>Job: %{{customdata}}<extra></extra>"
                 ),
             ))
  
-        # variance segment stacked on top — red if over budget, green if under
+        # end-of-bar marker + label: evidences Total and Invoiced right where the bar ends,
+        # marker colour carries the variance sign (green = under/at budget, red = over budget)
         var_colors = [COLOR_GREEN if v >= 0 else COLOR_RED for v in agg["variance"]]
-        fig3.add_trace(go.Bar(
-            x=x_levels, y=agg["variance"].abs(), name="Variance",
-            marker_color=var_colors,
-            text=[fmt_money_short(v) if abs(v) >= 1 else "" for v in agg["variance"]],
-            textposition="outside",
-            textfont=dict(size=9),
+        invoiced_pct = np.where(agg["total"] > 0, agg["invoiced"] / agg["total"] * 100, 0.0)
+        end_labels = [
+            f"<b>Total {fmt_money_short(t)}</b>  ·  Invoiced {fmt_money_short(iv)} ({p:.0f}%)"
+            for t, iv, p in zip(agg["total"], agg["invoiced"], invoiced_pct)
+        ]
+        fig3.add_trace(go.Scatter(
+            x=agg["total"], y=y_levels, mode="markers+text",
+            marker=dict(symbol="diamond", size=8, color=var_colors, line=dict(width=1, color="#FFFFFF")),
+            text=end_labels,
+            textposition="middle right",
+            textfont=dict(size=11, color=TEXT_DARK, family="IBM Plex Mono, monospace"),
             customdata=agg["variance"],
             hovertemplate="Variance: £%{customdata:,.2f}<extra></extra>",
             showlegend=False,
+            cliponaxis=False,
         ))
         # dummy traces purely to add red/green variance to the legend
-        fig3.add_trace(go.Bar(x=[[None], [None], [None], [None]], y=[None], marker_color=COLOR_GREEN, name="Positive variation"))
-        fig3.add_trace(go.Bar(x=[[None], [None], [None], [None]], y=[None], marker_color=COLOR_RED, name="Negative variation"))
+        fig3.add_trace(go.Bar(x=[None], y=[[None], [None], [None], [None]], orientation="h",
+                               marker_color=COLOR_GREEN, name="At/under budget (variance ≥ 0)"))
+        fig3.add_trace(go.Bar(x=[None], y=[[None], [None], [None], [None]], orientation="h",
+                               marker_color=COLOR_RED, name="Over budget (variance < 0)"))
  
         n_pid = len(agg)
-        col_width_px = 34
-        fig_width = max(1100, col_width_px * n_pid)
+        row_h = 24
+        fig_height = max(500, row_h * n_pid + 160)
  
         fig3.update_layout(
             **PLOTLY_LIGHT,
-            width=fig_width,
-            height=620,
+            height=fig_height,
             barmode="stack",
-            yaxis=dict(title="£", tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
             xaxis=dict(
-                gridcolor=GRID_LIGHT, automargin=True, tickfont=dict(size=11),
-                tickangle=-90,
+                title="£", tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False,
+                tickfont=dict(size=12), range=[0, agg["total"].max() * 1.55],
             ),
-            legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center", bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
-            bargap=0.15,
-            margin=dict(l=50, r=20, t=40, b=10),
+            yaxis=dict(
+                gridcolor=GRID_LIGHT, automargin=True, tickfont=dict(size=12),
+                autorange="reversed",
+            ),
+            legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center", bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
+            bargap=0.22,
+            margin=dict(l=10, r=10, t=40, b=10),
         )
-        st.markdown(
-            "<div style='overflow-x:auto;border:1px solid #E2E7ED;border-radius:6px;padding:4px 0;'>",
-            unsafe_allow_html=True,
+        st.plotly_chart(fig3, use_container_width=True)
+        st.caption(
+            "Diamond marker = end of bar (Total) · colour = budget variance · "
+            "label shows Total and Invoiced value alongside % invoiced."
         )
-        st.plotly_chart(fig3, use_container_width=False)
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.caption("Scroll horizontally to see every PID — columns are ordered by total value, highest first.")
  
 # --------------------------------------------------------------------------
 # TAB 3 — Finance
@@ -755,4 +760,3 @@ with tab_finance:
  
 st.markdown("---")
 st.caption(f"Master Control Dashboard — data as of {date_max.date()}")
- 
