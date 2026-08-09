@@ -781,15 +781,9 @@ with tab_jobs:
             starts = cal_df["Outage Date"].dt.strftime("%Y-%m-%d").tolist()
             districts = cal_df["District"].tolist()
             schemes = cal_df["Scheme"].tolist()
-            circuits = cal_df["Circuit"].tolist()
-            pids = cal_df["PID"].tolist()
-            spen_pms = cal_df["SPEN PM"].tolist()
-            pois = cal_df["POI"].tolist()
  
             events = []
-            for start, district, scheme, circuit, pid, spen_pm, poi in zip(
-                starts, districts, schemes, circuits, pids, spen_pms, pois
-            ):
+            for start, district, scheme in zip(starts, districts, schemes):
                 d_str = "" if pd.isna(district) else str(district)
                 s_str = "" if pd.isna(scheme) else str(scheme)
                 color = DISTRICT_COLORS.get(district, "#2563eb")
@@ -799,14 +793,6 @@ with tab_jobs:
                     "allDay": True,
                     "backgroundColor": color,
                     "borderColor": color,
-                    "extendedProps": {
-                        "district": d_str or None,
-                        "scheme": s_str or None,
-                        "circuit": None if pd.isna(circuit) else str(circuit),
-                        "pid": None if pd.isna(pid) else str(pid),
-                        "spen_pm": None if pd.isna(spen_pm) else str(spen_pm),
-                        "poi": None if pd.isna(poi) else str(poi),
-                    },
                 })
  
             calendar_options = {
@@ -816,34 +802,27 @@ with tab_jobs:
                     "center": "title",
                     "right": "dayGridMonth,listMonth",
                 },
-                "height": 720,
+                "height": 650,
                 "firstDay": 1,
                 # Caps how many events render per day cell (extras collapse into
-                # a "+N more" popover) - this is what actually keeps the calendar
-                # fast on busy days, since rendering isn't proportional to
-                # event count anymore.
+                # a "+N more" popover) - keeps rendering fast on busy days.
                 "dayMaxEvents": True,
             }
  
-            cal_state = st_calendar(
+            # Pure display widget, no interactivity: previously, clicking an event
+            # to show its details triggered a full Streamlit script rerun (the
+            # whole app re-executes on every widget/component state change) -
+            # on a script this size, that made every click feel slow. callbacks=[]
+            # disables all click/select event listeners on the JS side, so the
+            # calendar is now just a fast visual with no rerun cost per click.
+            # Circuit/PID/SPEN PM/POI for a given outage are still visible in the
+            # Table view toggle above.
+            st_calendar(
                 events=events,
                 options=calendar_options,
+                callbacks=[],
                 key="outage_calendar",
             )
- 
-            st.divider()
-            if cal_state and cal_state.get("callback") == "eventClick":
-                clicked = cal_state["eventClick"]["event"]
-                props = clicked.get("extendedProps", {})
-                st.markdown(f"**{clicked.get('title', 'Outage')}**  —  {clicked.get('start', '')}")
- 
-                d1, d2, d3, d4 = st.columns(4)
-                d1.metric("Circuit", props.get("circuit") or "—")
-                d2.metric("PID", props.get("pid") or "—")
-                d3.metric("SPEN PM", props.get("spen_pm") or "—")
-                d4.metric("POI", props.get("poi") or "—")
-            else:
-                st.caption("Click an outage on the calendar to see its details here.")
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
@@ -1108,6 +1087,8 @@ with tab_forecast:
  
  
 with tab_totals:
+    GBP_COLUMN_CONFIG = lambda col_name: {col_name: st.column_config.NumberColumn(col_name, format="£%.2f")}
+ 
     total_val = pd.to_numeric(f[cols["total_col"]], errors="coerce").sum() if cols["total_col"] in f.columns else None
     orig_val = pd.to_numeric(f[cols["orig_col"]], errors="coerce").sum() if cols["orig_col"] in f.columns else None
  
@@ -1140,7 +1121,10 @@ with tab_totals:
         fig_proj.update_layout(height=max(360, 32 * len(by_project_total)), margin=dict(l=10, r=10, t=10, b=10))
         st.plotly_chart(fig_proj, use_container_width=True)
  
-        st.dataframe(by_project_total, height=320, use_container_width=True, hide_index=True)
+        st.dataframe(
+            by_project_total, height=320, use_container_width=True, hide_index=True,
+            column_config=GBP_COLUMN_CONFIG("Total value (£)"),
+        )
  
     if total_val is not None and orig_val is not None:
         f["_row_variance"] = pd.to_numeric(f[cols["total_col"]], errors="coerce") - pd.to_numeric(f[cols["orig_col"]], errors="coerce")
@@ -1157,6 +1141,7 @@ with tab_totals:
         st.dataframe(
             variance_table.sort_values("Difference (£)", key=abs, ascending=False),
             height=320, use_container_width=True, hide_index=True,
+            column_config=GBP_COLUMN_CONFIG("Difference (£)"),
         )
  
         st.subheader("Difference by Job")
@@ -1167,7 +1152,10 @@ with tab_totals:
             .rename(columns={"_row_variance": "Difference (£)"})
             .sort_values("Difference (£)", key=abs, ascending=False)
         )
-        st.dataframe(by_job, height=280, use_container_width=True, hide_index=True)
+        st.dataframe(
+            by_job, height=280, use_container_width=True, hide_index=True,
+            column_config=GBP_COLUMN_CONFIG("Difference (£)"),
+        )
  
         st.subheader("Difference by Project")
         if project_col in variance_rows.columns:
@@ -1177,4 +1165,7 @@ with tab_totals:
                 .rename(columns={project_col: "Project", "_row_variance": "Difference (£)"})
                 .sort_values("Difference (£)", key=abs, ascending=False)
             )
-            st.dataframe(by_project, height=280, use_container_width=True, hide_index=True)
+            st.dataframe(
+                by_project, height=280, use_container_width=True, hide_index=True,
+                column_config=GBP_COLUMN_CONFIG("Difference (£)"),
+            )
