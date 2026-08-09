@@ -910,14 +910,15 @@ with tab_jobs:
                     "allDay": True,
                     "backgroundColor": color,
                     "borderColor": color,
+                    # Only field beyond the basics - kept deliberately minimal so the
+                    # click payload stays small. FullCalendar's own "url" click-to-open
+                    # doesn't work reliably here: browsers block file:// UNC navigation
+                    # from inside a component's embedded iframe as a security measure,
+                    # regardless of what we set. The reliable fix is rendering the link
+                    # as a real button on Streamlit's own page (outside that iframe),
+                    # which is what the eventClick capture below is for.
+                    "extendedProps": {"link": link if has_link else None},
                 }
-                if has_link:
-                    # FullCalendar natively opens an event's "url" on click - this is
-                    # pure client-side browser navigation, not a Streamlit callback, so
-                    # it costs nothing extra: no Python round-trip, no script rerun.
-                    # callbacks=[] below (unchanged) means we never intercept the click,
-                    # so this default browser-link behavior fires unimpeded.
-                    event["url"] = link
                 events.append(event)
  
             calendar_options = {
@@ -934,22 +935,33 @@ with tab_jobs:
                 "dayMaxEvents": True,
             }
  
-            # Pure display widget, no interactivity captured on the Python side:
-            # clicking an event to show its details used to trigger a full
-            # Streamlit script rerun (the whole app re-executes on every
-            # widget/component state change) - on a script this size, that made
-            # every click feel slow. callbacks=[] disables all click/select
-            # listeners the WRAPPER would otherwise report back to Python, so
-            # there's no rerun cost per click - but FullCalendar's own built-in
-            # "open event.url on click" behavior still works, since that's
-            # native browser navigation the wrapper never needs to intercept.
-            st_calendar(
+            # callbacks=["eventClick"] - a click sends the event back to Python, which
+            # triggers one script rerun. That's a real cost, but it's the only way to
+            # reliably open a file:// link (a real <a target="_blank"> rendered on
+            # Streamlit's own page, below, isn't blocked by iframe sandboxing the way
+            # FullCalendar's native in-iframe click-to-open was).
+            cal_state = st_calendar(
                 events=events,
                 options=calendar_options,
-                callbacks=[],
+                callbacks=["eventClick"],
                 key="outage_calendar",
             )
-            st.caption("📎 = has a linked folder. Click that outage to open it (opens as a local/network file link - works when your browser and OS allow file:// links to that network share).")
+            st.caption("📎 = has a linked folder. Click it, then use the button below to open it.")
+ 
+            if cal_state and cal_state.get("callback") == "eventClick":
+                clicked = cal_state["eventClick"]["event"]
+                link = clicked.get("extendedProps", {}).get("link")
+                if link:
+                    st.markdown(
+                        f'<a href="{link}" target="_blank" rel="noopener" '
+                        f'style="display:inline-block; padding:6px 14px; background:#2563eb; '
+                        f'color:white; border-radius:6px; text-decoration:none; font-weight:600;">'
+                        f'📂 Open: {clicked.get("title", "outage").lstrip("📎 ")}</a>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("Opens in a new tab as a local/network file link - works when your browser and OS allow file:// links to that network share.")
+                else:
+                    st.caption(f"**{clicked.get('title', 'Outage')}** has no linked folder.")
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
@@ -1296,4 +1308,3 @@ with tab_totals:
                 by_project, height=280, use_container_width=True, hide_index=True,
                 column_config=GBP_COLUMN_CONFIG("Difference (£)"),
             )
- 
