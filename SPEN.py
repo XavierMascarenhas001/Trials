@@ -1,4 +1,3 @@
- 
 import datetime as dt
  
 import numpy as np
@@ -44,7 +43,6 @@ PLOTLY_LIGHT = dict(
     paper_bgcolor=PANEL_BG,
     plot_bgcolor=PANEL_BG,
     font=dict(color=TEXT_DARK, family="IBM Plex Mono, monospace", size=13),
-    margin=dict(l=10, r=10, t=30, b=10),
 )
  
  
@@ -326,6 +324,7 @@ with tab_trend:
             xaxis=dict(gridcolor=GRID_LIGHT, tickfont=dict(size=12)),
             legend=dict(orientation="h", y=-0.18, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
             bargap=0.25,
+            margin=dict(l=10, r=10, t=30, b=10),
         )
         st.plotly_chart(fig, use_container_width=True)
  
@@ -389,6 +388,7 @@ with tab_trend:
                 bgcolor="rgba(0,0,0,0)", font=dict(size=11), tracegroupgap=4,
             ),
             bargap=0.25,
+            margin=dict(l=10, r=10, t=30, b=10),
         )
         st.plotly_chart(fig2, use_container_width=True)
         if has_other:
@@ -507,7 +507,7 @@ with tab_pid:
             ),
             legend=dict(orientation="h", y=1.04, x=0.5, xanchor="center", bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
             bargap=0.28,
-            font=dict(size=13),
+            margin=dict(l=10, r=40, t=40, b=10),
         )
         st.plotly_chart(fig3, use_container_width=True)
  
@@ -702,3 +702,4 @@ with tab_finance:
  
 st.markdown("---")
 st.caption(f"Master Control Dashboard — data as of {date_max.date()}")
+ 
