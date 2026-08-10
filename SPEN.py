@@ -10,13 +10,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from streamlit_calendar import calendar as st_calendar
  
-try:
-    from docx import Document
-    from docx.shared import Pt
-    DOCX_AVAILABLE = True
-except ImportError:
-    DOCX_AVAILABLE = False
- 
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
 # ============================================================
@@ -24,6 +17,55 @@ st.set_page_config(page_title="Network Job Tracker", layout="wide")
 # ============================================================
 # Streamlit Cloud has no access to internal UNC/network paths, so the
 # workbook is uploaded via a file_uploader instead of read from disk.
+ 
+ 
+@st.cache_data(show_spinner=False, max_entries=5)
+def build_calendar_events(cal_df: pd.DataFrame) -> list:
+    """Vectorized FullCalendar event build (zip over plain Python lists,
+    no .iterrows()) - cached so re-rendering the calendar on an unrelated
+    rerun (a date click now costs a full script rerun) doesn't rebuild
+    the same event list from scratch every time."""
+    palette = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#be185d", "#4d7c0f"]
+    districts_sorted = sorted(cal_df["District"].dropna().unique())
+    district_colors = {d: palette[i % len(palette)] for i, d in enumerate(districts_sorted)}
+ 
+    starts = cal_df["Outage Date"].dt.strftime("%Y-%m-%d").tolist()
+    districts = cal_df["District"].tolist()
+    schemes = cal_df["Scheme"].tolist()
+    outage_nums = cal_df["Outage #"].tolist()
+    circuits_evt = cal_df["Circuit"].tolist()
+    pids_evt = cal_df["PID"].tolist()
+    pms_evt = cal_df["SPEN PM"].tolist()
+    pois_evt = cal_df["POI"].tolist()
+ 
+    def _evt_str(v):
+        return "" if pd.isna(v) or str(v).strip() == "" else str(v).strip()
+ 
+    events = []
+    for start, district, scheme, onum, circuit, pid, pm, poi in zip(
+        starts, districts, schemes, outage_nums, circuits_evt, pids_evt, pms_evt, pois_evt
+    ):
+        d_str, s_str = _evt_str(district), _evt_str(scheme)
+        # Full title (District — Scheme — PID — Circuit — Outage # — PM — POI): this is
+        # what FullCalendar puts on the event element's native "title" attribute, so
+        # hovering shows the complete text even though the day cell itself clips it to
+        # one line (see custom_css at the call site) instead of wrapping and breaking
+        # the grid.
+        parts = [d_str, s_str]
+        for label, val in [("PID", pid), ("Circuit", circuit), ("Outage #", onum), ("PM", pm), ("POI", poi)]:
+            v = _evt_str(val)
+            if v:
+                parts.append(f"{label} {v}")
+        full_title = " — ".join(p for p in parts if p) or "Outage"
+        color = district_colors.get(district, "#2563eb")
+        events.append({
+            "title": full_title,
+            "start": start,
+            "allDay": True,
+            "backgroundColor": color,
+            "borderColor": color,
+        })
+    return events
  
  
 @st.cache_data(show_spinner="Reading outage programme...", max_entries=3)
@@ -411,53 +453,43 @@ def show_total_banner(label, value_str):
     )
  
  
-def generate_outage_docx(day_df: pd.DataFrame, selected_date) -> bytes:
-    """Work Instructions for a single calendar date - same idea as the
-    workpacks tool's generate_pole_docx(): one bullet per job, key facts
-    bolded up front, everything else tucked into parentheses after it.
-    This sheet doesn't carry MD Poling/pole/qsub/comment columns like the
-    workpacks master parquet does, so the bullet is built from whatever
-    of District/Scheme/Outage #/Circuit/PID/SPEN PM/POI is actually filled
-    in for that row, rather than assuming a fixed set of columns."""
-    doc = Document()
-    doc.add_heading(f"Work Instructions — {selected_date:%d %b %Y}", level=1)
-    doc.add_paragraph(f"Generated: {datetime.now():%Y-%m-%d %H:%M}")
-    doc.add_paragraph(f"Total outages: {len(day_df)}")
-    doc.add_paragraph("")
+@st.cache_data(show_spinner=False, max_entries=8)
+def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, pole_col) -> pd.DataFrame:
+    """Work Instructions for a single date, as a table instead of a Word
+    doc - same grouping the workpacks tool's generate_pole_docx() uses
+    (one row per pole+task, pole-first order, blank/'0' rows dropped,
+    'Erect' flagged) but built with vectorized pandas ops instead of
+    row-by-row iterrows(), and cached so re-selecting the same date on a
+    later rerun (e.g. from an unrelated widget elsewhere) is instant.
+    """
+    if day_df.empty or item_col not in day_df.columns or qsub_col not in day_df.columns:
+        return pd.DataFrame(columns=["Pole", "Task", "Qty", "Erect"])
  
-    def _clean(v):
-        if v is None or (isinstance(v, float) and pd.isna(v)):
-            return ""
-        s = str(v).strip()
-        return "" if s.lower() in ("", "nan", "none", "nat") else s
+    pole_vals = (
+        day_df[pole_col].astype(str).str.strip()
+        if pole_col and pole_col in day_df.columns
+        else pd.Series("(no pole column mapped)", index=day_df.index)
+    )
+    out = pd.DataFrame({
+        "Pole": pole_vals,
+        "Task": day_df[item_col].astype(str).str.strip(),
+        "Qty": day_df[qsub_col],
+    })
  
-    for _, row in day_df.iterrows():
-        district = _clean(row.get("District"))
-        scheme = _clean(row.get("Scheme"))
-        pid = _clean(row.get("PID"))
+    bad = {"", "nan", "none", "nat", "0"}
+    out = out[~out["Pole"].str.lower().isin(bad) & ~out["Task"].str.lower().isin(bad)]
+    if out.empty:
+        return pd.DataFrame(columns=["Pole", "Task", "Qty", "Erect"])
  
-        p = doc.add_paragraph(style="List Bullet")
-        p.paragraph_format.space_after = Pt(6)
+    out["Erect"] = out["Task"].str.contains("erect", case=False, na=False).map({True: "Yes", False: ""})
  
-        headline = " — ".join(b for b in (district, scheme or "Outage") if b) or "Outage"
-        run_main = p.add_run(headline)
-        run_main.bold = True
- 
-        extras = []
-        for label, key in [
-            ("PID", "PID"), ("Circuit", "Circuit"), ("Outage #", "Outage #"),
-            ("SPEN PM", "SPEN PM"), ("POI", "POI"), ("Weekday", "Weekday"),
-        ]:
-            val = _clean(row.get(key))
-            if val:
-                extras.append(f"{label}: {val}")
-        if extras:
-            p.add_run("  (" + "; ".join(extras) + ")")
- 
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf.getvalue()
+    # pole-first order (same idea as the workpacks tool's _dedup_keep_order):
+    # each pole's rows stay together, ordered by that pole's first appearance.
+    pole_order = out["Pole"].drop_duplicates().tolist()
+    out["Pole"] = pd.Categorical(out["Pole"], categories=pole_order, ordered=True)
+    out = out.sort_values("Pole", kind="stable").reset_index(drop=True)
+    out["Pole"] = out["Pole"].astype(str)
+    return out
  
  
 @st.cache_data(max_entries=3)
@@ -528,6 +560,7 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     return df
  
  
+@st.cache_data(show_spinner=False, max_entries=5)
 def cv7_dedupe_poles(frame: pd.DataFrame) -> set:
     """Poles already covered by a CV7 erect/recover item - mirrors the
     export tool's cv7_poles = cv7_set(df, CV7_erect) | cv7_set(df, CV7_erect_H)
@@ -827,48 +860,8 @@ with tab_jobs:
         if outage_view == "Table":
             st.dataframe(outage_f, height=420, use_container_width=True, hide_index=True)
         else:
-            palette = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#be185d", "#4d7c0f"]
-            districts_sorted = sorted(outage_f["District"].dropna().unique())
-            DISTRICT_COLORS = {d: palette[i % len(palette)] for i, d in enumerate(districts_sorted)}
- 
             cal_df = outage_f.dropna(subset=["Outage Date"])
-            # Vectorized event build (no .iterrows(), which is slow row-by-row) -
-            # zip over plain Python lists is the fastest way to do this in pandas.
-            starts = cal_df["Outage Date"].dt.strftime("%Y-%m-%d").tolist()
-            districts = cal_df["District"].tolist()
-            schemes = cal_df["Scheme"].tolist()
-            outage_nums = cal_df["Outage #"].tolist()
-            circuits_evt = cal_df["Circuit"].tolist()
-            pids_evt = cal_df["PID"].tolist()
-            pms_evt = cal_df["SPEN PM"].tolist()
-            pois_evt = cal_df["POI"].tolist()
- 
-            def _evt_str(v):
-                return "" if pd.isna(v) or str(v).strip() == "" else str(v).strip()
- 
-            events = []
-            for start, district, scheme, onum, circuit, pid, pm, poi in zip(
-                starts, districts, schemes, outage_nums, circuits_evt, pids_evt, pms_evt, pois_evt
-            ):
-                d_str, s_str = _evt_str(district), _evt_str(scheme)
-                # Full title (District — Scheme — PID — Circuit — Outage # — PM — POI): this is
-                # what FullCalendar puts on the event element's native "title" attribute, so
-                # hovering shows the complete text even though the day cell itself clips it to
-                # one line (see custom_css below) instead of wrapping and breaking the grid.
-                parts = [d_str, s_str]
-                for label, val in [("PID", pid), ("Circuit", circuit), ("Outage #", onum), ("PM", pm), ("POI", poi)]:
-                    v = _evt_str(val)
-                    if v:
-                        parts.append(f"{label} {v}")
-                full_title = " — ".join(p for p in parts if p) or "Outage"
-                color = DISTRICT_COLORS.get(district, "#2563eb")
-                events.append({
-                    "title": full_title,
-                    "start": start,
-                    "allDay": True,
-                    "backgroundColor": color,
-                    "borderColor": color,
-                })
+            events = build_calendar_events(cal_df)
  
             calendar_options = {
                 "initialView": "dayGridMonth",
@@ -895,9 +888,11 @@ with tab_jobs:
             """
  
             # dateClick/eventClick re-enabled (each click now costs a Streamlit
-            # rerun) so a click can drive the breakdown table + Work Instructions
-            # download below - the earlier callbacks=[] traded that interactivity
-            # away for speed, which no longer fits what's needed here.
+            # rerun) so a click can drive the breakdown + Work Instructions table
+            # below - callbacks=[] previously traded that away for speed. The
+            # heavier per-rerun computations elsewhere (cv7_dedupe_poles, this
+            # event list, the pole/task table) are now cached, so a click here
+            # no longer re-runs them from scratch every time.
             calendar_result = st_calendar(
                 events=events,
                 options=calendar_options,
@@ -924,7 +919,7 @@ with tab_jobs:
  
             st.divider()
             if selected_date is None:
-                st.caption("Click a date or an outage above to see its full breakdown here.")
+                st.caption("Click a date or an outage above to see its full breakdown and Work Instructions here.")
             else:
                 day_rows = outage_f[outage_f["Outage Date"].dt.date == selected_date]
                 st.markdown(f"**Outages on {selected_date:%d %b %Y}** ({len(day_rows):,})")
@@ -932,18 +927,23 @@ with tab_jobs:
                     st.caption("No outages on this date under the current filters.")
                 else:
                     st.dataframe(day_rows, use_container_width=True, hide_index=True)
-                    if DOCX_AVAILABLE:
-                        st.download_button(
-                            "📄 Generate Work Instructions (.docx)",
-                            data=generate_outage_docx(day_rows, selected_date),
-                            file_name=f"Work_Instructions_{selected_date:%Y-%m-%d}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        )
+ 
+                st.markdown(f"**Work Instructions — poles & MD Poling tasks on {selected_date:%d %b %Y}**")
+                if cols.get("date_col") is None or f["_date"].isna().all():
+                    st.caption(
+                        "No usable dates in the main dataset's mapped 'Date' column - pick one under "
+                        "'Column mapping' in the sidebar to enable this breakdown."
+                    )
+                else:
+                    day_job_rows = f[f["_date"].dt.date == selected_date]
+                    pole_task_df = build_pole_task_table(
+                        day_job_rows, cols["item_col"], cols["qsub_col"], cols.get("pole_col")
+                    )
+                    if pole_task_df.empty:
+                        st.caption("No pole/task records for this date in the main dataset under the current filters.")
                     else:
-                        st.caption(
-                            "⚠️ Work Instructions export needs the 'python-docx' package - "
-                            "add `python-docx` to requirements.txt and redeploy to enable it."
-                        )
+                        st.caption(f"{pole_task_df['Pole'].nunique():,} pole(s) · {len(pole_task_df):,} task row(s)")
+                        st.dataframe(pole_task_df, use_container_width=True, hide_index=True, height=420)
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
@@ -1303,4 +1303,3 @@ with tab_totals:
                 by_project, height=280, use_container_width=True, hide_index=True,
                 column_config=GBP_COLUMN_CONFIG("Difference (£)"),
             )
- 
