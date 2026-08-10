@@ -70,7 +70,13 @@ def load_data(file) -> pd.DataFrame:
     df["flag"] = "other"
     df.loc[job_lower.str.startswith(("m -", "m-"), na=False), "flag"] = "material"
     df.loc[job_lower.str.startswith(("c -", "c-"), na=False), "flag"] = "construction"
-    df = df[df["flag"] != "other"].copy()
+    # NOTE: rows that don't match either prefix ("other") are now KEPT here, not dropped.
+    # Dropping them at this point used to silently shrink the date range shown in the
+    # sidebar date picker whenever newer jobs didn't follow the "M -" / "C -" convention —
+    # the picker's min/max were computed AFTER those rows were already gone. They're still
+    # excluded from every chart downstream (via the flag filter applied to fdf), but they
+    # now count toward the min/max date bounds, so the calendar always reflects the true
+    # range of dates in the uploaded file.
  
     # datetouse sometimes carries a placeholder ~1900 date for "no date" — treat as missing
     df["datetouse"] = df["datetouse"].where(df["datetouse"].dt.year > 1901)
@@ -182,6 +188,17 @@ if uploaded is None:
  
 df = load_data(uploaded)
  
+other_count = int((df["flag"] == "other").sum())
+if other_count:
+    with st.sidebar.expander(f"⚠️ {other_count:,} row(s) not classified"):
+        st.caption(
+            "These jobs don't start with 'M -' / 'M-' (material) or 'C -' / 'C-' "
+            "(construction), so they're excluded from every chart below. Their dates "
+            "still count toward the date-range picker's min/max. Sample job codes:"
+        )
+        sample = df.loc[df["flag"] == "other", "job"].dropna().drop_duplicates().head(15).tolist()
+        st.write(sample)
+ 
 date_min = df["datetouse"].min()
 date_max = df["datetouse"].max()
  
@@ -213,6 +230,7 @@ if st.sidebar.button("Reset filters"):
 # --------------------------------------------------------------------------
  
 mask = pd.Series(True, index=df.index)
+mask &= df["flag"] != "other"  # charts only ever show material/construction, same as before
 if districts:
     mask &= df["district"].isin(districts)
 if projects:
