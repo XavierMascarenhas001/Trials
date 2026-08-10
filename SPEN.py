@@ -9,8 +9,13 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from streamlit_calendar import calendar as st_calendar
-from docx import Document
-from docx.shared import Pt
+ 
+try:
+    from docx import Document
+    from docx.shared import Pt
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
  
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
@@ -927,12 +932,18 @@ with tab_jobs:
                     st.caption("No outages on this date under the current filters.")
                 else:
                     st.dataframe(day_rows, use_container_width=True, hide_index=True)
-                    st.download_button(
-                        "📄 Generate Work Instructions (.docx)",
-                        data=generate_outage_docx(day_rows, selected_date),
-                        file_name=f"Work_Instructions_{selected_date:%Y-%m-%d}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    )
+                    if DOCX_AVAILABLE:
+                        st.download_button(
+                            "📄 Generate Work Instructions (.docx)",
+                            data=generate_outage_docx(day_rows, selected_date),
+                            file_name=f"Work_Instructions_{selected_date:%Y-%m-%d}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        )
+                    else:
+                        st.caption(
+                            "⚠️ Work Instructions export needs the 'python-docx' package - "
+                            "add `python-docx` to requirements.txt and redeploy to enable it."
+                        )
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
@@ -1292,3 +1303,4 @@ with tab_totals:
                 by_project, height=280, use_container_width=True, hide_index=True,
                 column_config=GBP_COLUMN_CONFIG("Difference (£)"),
             )
+ 
