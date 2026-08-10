@@ -941,21 +941,34 @@ with tab_jobs:
                     "center": "title",
                     "right": "dayGridMonth,listMonth",
                 },
-                "height": 650,
+                # "auto" instead of a fixed pixel height: dayMaxEvents:False (below)
+                # lets every day cell grow tall enough to show ALL of its events
+                # directly, so nothing is hidden behind a "+N more" link that would
+                # otherwise need a click to open. A fixed height would just clip or
+                # squash that content instead of revealing it.
+                "height": "auto",
                 "firstDay": 1,
-                # Caps how many events render per day cell (extras collapse into
-                # a "+N more" popover) - keeps rendering fast on busy days.
-                "dayMaxEvents": True,
+                # False = no per-day cap - every outage for every day renders inline,
+                # so information is visible with no interaction at all (this trades
+                # away the old "+N more" collapsing, which kept row heights uniform
+                # and rendering cheap on very busy days - worth knowing if a month
+                # with dozens of outages on one day starts to feel sluggish).
+                "dayMaxEvents": False,
             }
  
             # Keeps each event on a single line (ellipsis instead of wrapping onto a
             # second/third line and breaking the day cell's height/layout). The full
             # text is still there in the "title" attribute above, so hovering an
-            # event reveals it regardless of how it's visually clipped here.
+            # event reveals it regardless of how it's visually clipped here. The
+            # streamlit-calendar wrapper only accepts plain JSON options (no custom
+            # JS), so a true "expand on hover" handler isn't available - showing
+            # every event inline (dayMaxEvents:False above) is the closest
+            # equivalent: nothing is hidden behind an interaction in the first place.
             calendar_custom_css = """
                 .fc-event-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                 .fc-daygrid-event { white-space: nowrap; cursor: pointer; }
                 .fc-daygrid-day-number { cursor: pointer; }
+                .fc-daygrid-day:hover { background-color: #eef2ff; }
             """
  
             # dateClick/eventClick re-enabled (each click now costs a Streamlit
@@ -1374,4 +1387,3 @@ with tab_totals:
                 by_project, height=280, use_container_width=True, hide_index=True,
                 column_config=GBP_COLUMN_CONFIG("Difference (£)"),
             )
- 
