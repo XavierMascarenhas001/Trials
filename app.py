@@ -1,25 +1,41 @@
+"""
+Master Control — Job Costing Dashboard
+Streamlit app. Deploy on Streamlit Community Cloud straight from GitHub.
+
+Repo layout:
+    app.py
+    requirements.txt
+
+No data file is bundled — upload the latest Master Control parquet export
+from the sidebar each time you open the app.
+
+Run locally:
+    pip install -r requirements.txt
+    streamlit run app.py
+"""
+
 import datetime as dt
- 
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
- 
+
 # --------------------------------------------------------------------------
 # Config
 # --------------------------------------------------------------------------
- 
+
 st.set_page_config(
     page_title="Master Control — Job Costing Dashboard",
     layout="wide",
     initial_sidebar_state="expanded",
 )
- 
+
 COLUMNS_NEEDED = [
     "job", "plan1", "done", "datetouse", "invoice date", "total", "orig",
     "district", "project", "project manager", "team", "team lider", "pid",
 ]
- 
+
 COLOR_GREEN = "#1E9E5A"      # positive variation
 COLOR_RED = "#D64545"        # negative variation / PID tab — remaining
 COLOR_YELLOW = "#F0B429"     # materials
@@ -29,43 +45,43 @@ COLOR_TEAL = "#2C7DA0"       # PID tab — total (KPI accent)
 COLOR_AMBER = "#E0A02A"      # PID tab — planned
 COLOR_PURPLE = "#7C5CBF"     # PID tab — invoiced
 COLOR_MUTED = "#B7BFC9"
- 
+
 CATEGORY_PALETTE = [
     "#2C7DA0", "#E0A02A", "#7C5CBF", "#1E9E5A", "#D64545",
     "#2F9E9E", "#A85CB0", "#7C8C2A", "#C25C82", "#4C6FC2",
 ]
- 
+
 TEXT_DARK = "#1B2430"
 TEXT_MUTED = "#5B6B7C"
 GRID_LIGHT = "#E2E7ED"
 PANEL_BG = "#FFFFFF"
- 
+
 PLOTLY_LIGHT = dict(
     paper_bgcolor=PANEL_BG,
     plot_bgcolor=PANEL_BG,
     font=dict(color=TEXT_DARK, family="IBM Plex Mono, monospace", size=13),
 )
- 
- 
+
+
 # --------------------------------------------------------------------------
 # Data loading
 # --------------------------------------------------------------------------
- 
+
 @st.cache_data(show_spinner="Loading Master Control data…")
 def load_data(file) -> pd.DataFrame:
     df = pd.read_parquet(file, columns=COLUMNS_NEEDED)
- 
+
     # total / orig sometimes land as text — coerce to numeric
     df["total"] = pd.to_numeric(df["total"], errors="coerce")
     df["orig"] = pd.to_numeric(df["orig"], errors="coerce")
- 
+
     for c in ["plan1", "done", "datetouse", "invoice date"]:
         df[c] = pd.to_datetime(df[c], errors="coerce")
- 
+
     for c in ["district", "project", "project manager", "team", "team lider", "pid", "job"]:
         df[c] = df[c].astype("string").str.strip()
         df[c] = df[c].replace("", pd.NA)
- 
+
     job_lower = df["job"].str.lower()
     df["flag"] = "other"
     df.loc[job_lower.str.startswith(("m -", "m-"), na=False), "flag"] = "material"
@@ -77,24 +93,24 @@ def load_data(file) -> pd.DataFrame:
     # excluded from every chart downstream (via the flag filter applied to fdf), but they
     # now count toward the min/max date bounds, so the calendar always reflects the true
     # range of dates in the uploaded file.
- 
+
     # datetouse sometimes carries a placeholder ~1900 date for "no date" — treat as missing
     df["datetouse"] = df["datetouse"].where(df["datetouse"].dt.year > 1901)
- 
+
     return df
- 
- 
+
+
 # --------------------------------------------------------------------------
 # Formatting helpers
 # --------------------------------------------------------------------------
- 
+
 def fmt_money(v: float) -> str:
     if pd.isna(v):
         v = 0.0
     sign = "-" if v < 0 else ""
     return f"{sign}£{abs(v):,.2f}"
- 
- 
+
+
 def fmt_money_short(v: float) -> str:
     if pd.isna(v):
         v = 0.0
@@ -105,8 +121,8 @@ def fmt_money_short(v: float) -> str:
     if a >= 1_000:
         return f"{sign}£{a/1_000:.1f}k"
     return f"{sign}£{a:.0f}"
- 
- 
+
+
 def auto_granularity(date_from: dt.date, date_to: dt.date) -> str:
     days = (date_to - date_from).days
     if days <= 31:
@@ -116,8 +132,8 @@ def auto_granularity(date_from: dt.date, date_to: dt.date) -> str:
     if days <= 900:
         return "Month"
     return "Year"
- 
- 
+
+
 def bucket_series(dates: pd.Series, granularity: str) -> pd.Series:
     if granularity == "Day":
         return dates.dt.to_period("D").dt.start_time
@@ -126,8 +142,8 @@ def bucket_series(dates: pd.Series, granularity: str) -> pd.Series:
     if granularity == "Month":
         return dates.dt.to_period("M").dt.start_time
     return dates.dt.to_period("Y").dt.start_time
- 
- 
+
+
 def bucket_label(ts: pd.Timestamp, granularity: str) -> str:
     if granularity == "Day":
         return ts.strftime("%-d %b") if hasattr(ts, "strftime") else str(ts)
@@ -136,8 +152,8 @@ def bucket_label(ts: pd.Timestamp, granularity: str) -> str:
     if granularity == "Month":
         return ts.strftime("%b %Y")
     return ts.strftime("%Y")
- 
- 
+
+
 def metric_row(items):
     """items: list of (label, value_str, accent_color_or_None, highlight_bool)"""
     cols = st.columns(len(items))
@@ -165,29 +181,29 @@ def metric_row(items):
                 """,
                 unsafe_allow_html=True,
             )
- 
- 
+
+
 # --------------------------------------------------------------------------
 # Sidebar — data source + filters
 # --------------------------------------------------------------------------
- 
+
 st.sidebar.title("Master Control")
 st.sidebar.caption("Job costing & progress — construction / materials")
- 
+
 st.sidebar.markdown("### Data source")
 uploaded = st.sidebar.file_uploader(
     "Upload Master Control parquet",
     type=["parquet"],
     help="Drop in the latest export each time — nothing is stored between sessions.",
 )
- 
+
 if uploaded is None:
     st.title("Master Control — Job Costing Dashboard")
     st.info("⬅️ Upload the latest Master Control parquet file in the sidebar to get started.")
     st.stop()
- 
+
 df = load_data(uploaded)
- 
+
 other_count = int((df["flag"] == "other").sum())
 if other_count:
     with st.sidebar.expander(f"⚠️ {other_count:,} row(s) not classified"):
@@ -198,12 +214,12 @@ if other_count:
         )
         sample = df.loc[df["flag"] == "other", "job"].dropna().drop_duplicates().head(15).tolist()
         st.write(sample)
- 
+
 date_min = df["datetouse"].min()
 date_max = df["datetouse"].max()
- 
+
 st.sidebar.markdown("### Filters")
- 
+
 date_range = st.sidebar.date_input(
     "Date range",
     value=(date_min.date(), date_max.date()),
@@ -214,21 +230,21 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
     date_from, date_to = date_range
 else:
     date_from, date_to = date_min.date(), date_max.date()
- 
+
 districts = st.sidebar.multiselect("District", sorted(df["district"].dropna().unique()))
 projects = st.sidebar.multiselect("Project", sorted(df["project"].dropna().unique()))
 pids = st.sidebar.multiselect("PID", sorted(df["pid"].dropna().unique()))
 pms = st.sidebar.multiselect("Project Manager", sorted(df["project manager"].dropna().unique()))
- 
+
 gran_choice = st.sidebar.selectbox("Date grouping", ["Auto", "Day", "Week", "Month", "Year"])
- 
+
 if st.sidebar.button("Reset filters"):
     st.rerun()
- 
+
 # --------------------------------------------------------------------------
 # Apply filters
 # --------------------------------------------------------------------------
- 
+
 mask = pd.Series(True, index=df.index)
 mask &= df["flag"] != "other"  # charts only ever show material/construction, same as before
 if districts:
@@ -239,55 +255,55 @@ if pids:
     mask &= df["pid"].isin(pids)
 if pms:
     mask &= df["project manager"].isin(pms)
- 
+
 fdf = df[mask].copy()
- 
+
 date_mask = fdf["datetouse"].notna() & (fdf["datetouse"].dt.date >= date_from) & (fdf["datetouse"].dt.date <= date_to)
 fdf_dated = fdf[date_mask].copy()
- 
+
 granularity = auto_granularity(date_from, date_to) if gran_choice == "Auto" else gran_choice
- 
+
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     f"<span style='font-family:monospace;font-size:12px;color:#7C8AA0;'>"
     f"RECORDS IN VIEW: <b style='color:#E3A64A;'>{len(fdf_dated):,}</b></span>",
     unsafe_allow_html=True,
 )
- 
+
 # --------------------------------------------------------------------------
 # Header
 # --------------------------------------------------------------------------
- 
+
 st.title("Master Control — Job Costing Dashboard")
 st.caption(
     f"Source: Master parquet · {date_min.date()} → {date_max.date()} · "
     f"grouping: {granularity}{' (auto)' if gran_choice == 'Auto' else ''}"
 )
- 
+
 tab_trend, tab_pid, tab_finance = st.tabs(["📈 Trends", "📊 PID Breakdown", "💰 Finance"])
- 
+
 # --------------------------------------------------------------------------
 # TAB 1 — Trends
 # --------------------------------------------------------------------------
- 
+
 with tab_trend:
     st.subheader("Panel 01 — Total by Date (Construction + Materials)")
     st.caption(
         "Each bar = base (navy) + variance vs. original (red/green) + materials (yellow), stacked"
     )
- 
+
     construction = fdf_dated[fdf_dated["flag"] == "construction"].copy()
     material = fdf_dated[fdf_dated["flag"] == "material"].copy()
- 
+
     if construction.empty and material.empty:
         st.info("No records under these filters. Widen the date range or clear a filter.")
     else:
         construction["bucket"] = bucket_series(construction["datetouse"], granularity)
         material["bucket"] = bucket_series(material["datetouse"], granularity)
- 
+
         c_agg = construction.groupby("bucket", as_index=False).agg(total=("total", "sum"), orig=("orig", "sum"))
         m_agg = material.groupby("bucket", as_index=False).agg(material=("total", "sum"))
- 
+
         chart_df = pd.merge(c_agg, m_agg, on="bucket", how="outer").fillna(0)
         chart_df = chart_df.sort_values("bucket")
         chart_df["variance"] = chart_df["total"] - chart_df["orig"]
@@ -296,13 +312,13 @@ with tab_trend:
         chart_df["cap"] = chart_df["variance"].abs()
         chart_df["cap_color"] = chart_df["variance"].apply(lambda v: COLOR_GREEN if v >= 0 else COLOR_RED)
         chart_df["label"] = chart_df["bucket"].apply(lambda ts: bucket_label(ts, granularity))
- 
+
         shared_buckets = chart_df["bucket"].tolist()
         shared_labels = chart_df["label"].tolist()
- 
+
         grand_total = chart_df["total"].sum() + chart_df["material"].sum()
         var_sum = chart_df["variance"].sum()
- 
+
         metric_row([
             ("Total (construction + materials)", fmt_money(grand_total), COLOR_NAVY, True),
             ("Construction total", fmt_money(chart_df["total"].sum()), None, False),
@@ -310,9 +326,9 @@ with tab_trend:
             ("Variance", fmt_money(var_sum), COLOR_GREEN if var_sum >= 0 else COLOR_RED, False),
             ("Materials", fmt_money(chart_df["material"].sum()), COLOR_YELLOW, False),
         ])
- 
+
         fig = go.Figure()
- 
+
         fig.add_trace(go.Bar(
             x=chart_df["label"], y=chart_df["base"],
             marker_color=COLOR_NAVY,
@@ -337,7 +353,7 @@ with tab_trend:
         # dummy traces purely to add red/green to the legend (variance trace itself is colour-mixed)
         fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_GREEN, name="Positive variation"))
         fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_RED, name="Negative variation"))
- 
+
         fig.update_layout(
             **PLOTLY_LIGHT,
             height=400,
@@ -352,11 +368,11 @@ with tab_trend:
             margin=dict(l=10, r=10, t=30, b=10),
         )
         st.plotly_chart(fig, use_container_width=True)
- 
+
     st.markdown("---")
     st.subheader("Panel 02 — Total by Team Leader (Construction)")
     st.caption("Stacked by team leader · same filters, date grouping & x-axis as Panel 01")
- 
+
     if construction.empty:
         st.info("No records under these filters.")
     else:
@@ -368,22 +384,22 @@ with tab_trend:
         TOP_N = 6
         top_liders = list(totals_by_lider.index[:TOP_N])
         has_other = len(totals_by_lider) > TOP_N
- 
+
         construction["lider_grp"] = construction["team lider"].fillna("Unassigned")
         if has_other:
             construction["lider_grp"] = construction["lider_grp"].where(
                 construction["lider_grp"].isin(top_liders), "Other"
             )
- 
+
         lider_order = top_liders + (["Other"] if has_other else [])
         color_map = {l: (COLOR_MUTED if l == "Other" else CATEGORY_PALETTE[i % len(CATEGORY_PALETTE)])
                      for i, l in enumerate(lider_order)}
- 
+
         def _short_name(name, n=16):
             return name if len(name) <= n else name[:n - 1] + "…"
- 
+
         short_label = {l: (l if l == "Other" else _short_name(l)) for l in lider_order}
- 
+
         # pivot onto the SAME bucket list & order used by Panel 01, so both x-axes match exactly
         lider_pivot = (
             construction.groupby(["bucket", "lider_grp"])["total"].sum()
@@ -391,14 +407,14 @@ with tab_trend:
             .reindex(index=shared_buckets, fill_value=0)
             .reindex(columns=lider_order, fill_value=0)
         )
- 
+
         var_sum = construction["total"].sum() - construction["orig"].sum()
         metric_row([
             ("Total (construction)", fmt_money(construction["total"].sum()), COLOR_NAVY, True),
             ("Original", fmt_money(construction["orig"].sum()), None, False),
             ("Variance", fmt_money(var_sum), COLOR_GREEN if var_sum >= 0 else COLOR_RED, False),
         ])
- 
+
         fig2 = go.Figure()
         for l in lider_order:
             fig2.add_trace(go.Bar(
@@ -429,39 +445,39 @@ with tab_trend:
             st.caption(
                 "Top " + str(TOP_N) + " team leaders shown individually — the rest are grouped under **Other**."
             )
- 
+
 # --------------------------------------------------------------------------
 # TAB 2 — PID Breakdown
 # --------------------------------------------------------------------------
- 
+
 with tab_pid:
     st.subheader("Panel 03 — PID Breakdown")
     st.caption("District → Project → Project Manager → PID, one bar per PID · ordered by total value, highest first")
- 
+
     mc_mode = st.radio("Show", ["All", "Construction", "Material"], horizontal=True)
- 
+
     pdf = fdf.dropna(subset=["pid"]).copy()
     if mc_mode != "All":
         pdf = pdf[pdf["flag"] == mc_mode.lower()]
- 
+
     if pdf.empty:
         st.info("No PIDs under these filters.")
     else:
         pdf["has_plan"] = pdf["plan1"].notna()
         pdf["has_done"] = pdf["done"].notna()
         pdf["has_inv"] = pdf["invoice date"].notna()
- 
+
         # mutually exclusive progress stage per row, so the four segments sum exactly to "total"
         pdf["stage"] = np.select(
             [pdf["has_inv"], pdf["has_done"], pdf["has_plan"]],
             ["invoiced", "done", "planned"],
             default="remaining",
         )
- 
+
         def _mode(s):
             m = s.mode()
             return m.iloc[0] if not m.empty else None
- 
+
         # group by PID alone so every PID gets exactly one row/bar — a PID that touched more
         # than one district/project/PM in the raw data is attributed to its most common one
         base = pdf.groupby("pid", dropna=False).agg(
@@ -471,15 +487,15 @@ with tab_pid:
             project=("project", _mode),
             pm=("project manager", _mode),
         ).reset_index()
- 
+
         stage_sums = pdf.groupby(["pid", "stage"], dropna=False)["total"].sum().unstack("stage", fill_value=0)
         for s in ["remaining", "planned", "done", "invoiced"]:
             if s not in stage_sums.columns:
                 stage_sums[s] = 0.0
         stage_sums = stage_sums.reset_index()
- 
+
         agg = base.merge(stage_sums, on="pid", how="left").fillna(0)
- 
+
         # variance always reflects construction budget (total vs original), independent of the Show toggle
         var_src = fdf.dropna(subset=["pid"])
         var_src = var_src[var_src["flag"] == "construction"]
@@ -488,9 +504,9 @@ with tab_pid:
         ).reset_index()
         var_agg["variance"] = var_agg["c_total"] - var_agg["c_orig"]
         agg = agg.merge(var_agg[["pid", "variance"]], on="pid", how="left").fillna({"variance": 0.0})
- 
+
         assert agg["pid"].is_unique  # one row = one bar, guaranteed
- 
+
         # order: district money desc -> project money desc -> project manager money desc -> pid money desc
         agg["district_total"] = agg.groupby("district")["total"].transform("sum")
         agg["project_total"] = agg.groupby(["district", "project"])["total"].transform("sum")
@@ -499,11 +515,11 @@ with tab_pid:
             ["district_total", "project_total", "pm_total", "total"],
             ascending=[False, False, False, False],
         )
- 
+
         agg["pm_label"] = agg["pm"].fillna("Unassigned")
         agg["district_label"] = agg["district"].fillna("Unassigned")
         agg["project_label"] = agg["project"].fillna("Unassigned")
- 
+
         var_sum_all = agg["variance"].sum()
         metric_row([
             ("Total", fmt_money(agg["total"].sum()), COLOR_NAVY, True),
@@ -514,21 +530,21 @@ with tab_pid:
             ("Variance", fmt_money(var_sum_all), COLOR_GREEN if var_sum_all >= 0 else COLOR_RED, False),
         ])
         st.caption(f"{len(agg)} PID(s) in view — Remaining/Planned/Done/Invoiced sum to Total; Variance is total vs. original budget")
- 
+
         # ---- render: plain HTML/CSS grouped bars (District > Project > PM > PID) ----
         # Plotly's multicategory axis proved unreliable at this row count/depth — this is
         # deterministic: exactly one proportional bar row per PID, grouped under nested headers.
- 
+
         def esc(s):
             return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
- 
+
         STAGE_COLS = [
             ("invoiced", "Invoiced", COLOR_PURPLE),
             ("done", "Done", COLOR_DARKBLUE),
             ("planned", "Planned", COLOR_AMBER),
             ("remaining", "Remaining", COLOR_MUTED),
         ]
- 
+
         # hover CSS: custom value tooltips on each bar segment + expand-on-hover for
         # truncated job names (pure CSS, no JS needed — works inside st.markdown)
         pid_hover_css = f"""
@@ -546,7 +562,7 @@ with tab_pid:
             border: 5px solid transparent; border-top-color: {TEXT_DARK};
         }}
         .pid-tooltip:hover .tt-box {{ visibility: visible; opacity: 1; }}
- 
+
         .job-name-wrap {{ position: relative; }}
         .job-name-full {{
             font-family: "IBM Plex Sans", sans-serif; font-size: 9.5px; color: {TEXT_MUTED};
@@ -562,7 +578,7 @@ with tab_pid:
         </style>
         """
         st.markdown(pid_hover_css, unsafe_allow_html=True)
- 
+
         legend_html = "".join(
             f"<span style='display:inline-flex;align-items:center;gap:5px;margin-right:16px;"
             f"font-family:\"IBM Plex Mono\",monospace;font-size:11px;color:{TEXT_MUTED};'>"
@@ -581,10 +597,10 @@ with tab_pid:
             f"Under value</span>"
         )
         st.markdown(f"<div style='margin:6px 0 14px;'>{legend_html}</div>", unsafe_allow_html=True)
- 
+
         rows_html = []
         last_district, last_project, last_pm = None, None, None
- 
+
         for _, r in agg.iterrows():
             if r["district_label"] != last_district:
                 d_total = agg.loc[agg["district_label"] == r["district_label"], "total"].sum()
@@ -596,7 +612,7 @@ with tab_pid:
                     f"<span>{esc(r['district_label'])}</span><span>{fmt_money(d_total)}</span></div>"
                 )
                 last_district, last_project, last_pm = r["district_label"], None, None
- 
+
             if r["project_label"] != last_project:
                 p_total = agg.loc[
                     (agg["district_label"] == r["district_label"]) & (agg["project_label"] == r["project_label"]),
@@ -610,7 +626,7 @@ with tab_pid:
                     f"<span>{esc(r['project_label'])}</span><span>{fmt_money(p_total)}</span></div>"
                 )
                 last_project, last_pm = r["project_label"], None
- 
+
             if r["pm_label"] != last_pm:
                 rows_html.append(
                     f"<div style='padding:4px 14px 2px 40px;font-family:\"IBM Plex Sans\",sans-serif;"
@@ -618,14 +634,14 @@ with tab_pid:
                     f"{esc(r['pm_label'])}</div>"
                 )
                 last_pm = r["pm_label"]
- 
+
             total = r["total"]
             pct = {k: (r[k] / total * 100 if total > 0 else 0) for k, _, _ in STAGE_COLS}
             invoiced_pct = (r["invoiced"] / total * 100) if total > 0 else 0.0
             var_color = COLOR_GREEN if r["variance"] >= 0 else COLOR_RED
             var_sign = "+" if r["variance"] >= 0 else ""
             var_label = "Over value" if r["variance"] >= 0 else "Under value"
- 
+
             # bar order, left to right: Invoiced, Done, Planned, [variance marker], Remaining (grey)
             seg_parts = []
             for k, label, color in STAGE_COLS:
@@ -651,9 +667,9 @@ with tab_pid:
                     f"</div>"
                 )
             segs = "".join(seg_parts)
- 
+
             job_full = esc(r["job"])
- 
+
             rows_html.append(f"""
             <div style='display:flex;align-items:center;gap:10px;padding:3px 14px 3px 52px;
                         border-top:1px solid #F0F2F5;'>
@@ -673,7 +689,7 @@ with tab_pid:
               </div>
             </div>
             """)
- 
+
         chart_html = "".join(rows_html)
         st.markdown(
             f"""
@@ -690,37 +706,37 @@ with tab_pid:
             "across very different PID sizes. Hover a segment to see its exact value, or hover "
             "a job name to read the full text. Scroll for the full list."
         )
- 
+
 # --------------------------------------------------------------------------
 # TAB 3 — Finance
 # --------------------------------------------------------------------------
- 
+
 with tab_finance:
     st.subheader("Panel 04 — Financial Health")
     st.caption("Budget performance, billing pipeline & invoicing speed · same filters as above")
- 
+
     fin = fdf_dated.copy()
     fin_c = fin[fin["flag"] == "construction"].copy()
     fin_m = fin[fin["flag"] == "material"].copy()
- 
+
     if fin.empty:
         st.info("No records under these filters. Widen the date range or clear a filter.")
     else:
         fin["has_plan"] = fin["plan1"].notna()
         fin["has_done"] = fin["done"].notna()
         fin["has_inv"] = fin["invoice date"].notna()
- 
+
         total_value = fin["total"].sum()
         orig_value = fin_c["orig"].sum()
         variance = fin_c["total"].sum() - orig_value
         variance_pct = (variance / orig_value * 100) if orig_value else 0.0
- 
+
         invoiced_sum = fin.loc[fin["has_inv"], "total"].sum()
         wip_sum = fin.loc[fin["has_done"] & ~fin["has_inv"], "total"].sum()          # earned, not yet billed
         backlog_sum = fin.loc[~fin["has_done"], "total"].sum()                        # not yet completed
         invoiced_pct = (invoiced_sum / total_value * 100) if total_value else 0.0
         material_pct = (fin_m["total"].sum() / total_value * 100) if total_value else 0.0
- 
+
         # ---- KPI row 1 : budget performance ----
         metric_row([
             ("Total Value", fmt_money(total_value), COLOR_NAVY, True),
@@ -736,16 +752,16 @@ with tab_finance:
             ("Backlog — not yet done", fmt_money(backlog_sum), COLOR_MUTED, False),
             ("Material share", f"{material_pct:.1f}%", COLOR_YELLOW, False),
         ])
- 
+
         st.markdown("---")
- 
+
         col_a, col_b = st.columns(2)
- 
+
         # ---- Billing pipeline (single stacked bar) ----
         with col_a:
             st.markdown("**Billing pipeline**")
             st.caption("Where the total value currently sits, end to end")
- 
+
             stage_vals = pd.Series({
                 "Remaining\n(not started)": fin.loc[~fin["has_plan"], "total"].sum(),
                 "Planned\n(not done)": fin.loc[fin["has_plan"] & ~fin["has_done"], "total"].sum(),
@@ -753,7 +769,7 @@ with tab_finance:
                 "Invoiced": invoiced_sum,
             })
             pipe_colors = [COLOR_MUTED, COLOR_AMBER, COLOR_GREEN, COLOR_PURPLE]
- 
+
             fig4 = go.Figure()
             for stage, val, color in zip(stage_vals.index, stage_vals.values, pipe_colors):
                 fig4.add_trace(go.Bar(
@@ -772,16 +788,16 @@ with tab_finance:
                 margin=dict(l=10, r=10, t=10, b=10),
             )
             st.plotly_chart(fig4, use_container_width=True)
- 
+
         # ---- Invoicing lag ----
         with col_b:
             st.markdown("**Invoicing speed**")
             st.caption("Days between job marked *done* and *invoiced*")
- 
+
             lag_df = fin[fin["has_done"] & fin["has_inv"]].copy()
             lag_df["lag_days"] = (lag_df["invoice date"] - lag_df["done"]).dt.days
             lag_df = lag_df[(lag_df["lag_days"] >= 0) & (lag_df["lag_days"] <= 365)]
- 
+
             if lag_df.empty:
                 st.info("Not enough done + invoiced pairs under these filters to measure lag.")
             else:
@@ -809,17 +825,17 @@ with tab_finance:
                     bargap=0.1,
                 )
                 st.plotly_chart(fig5, use_container_width=True)
- 
+
         st.markdown("---")
         st.markdown("**Variance by project**")
         st.caption("Construction total vs. original budget, worst to best")
- 
+
         proj_var = fin_c.groupby("project", dropna=False).agg(total=("total", "sum"), orig=("orig", "sum"))
         proj_var = proj_var[proj_var["orig"] != 0]
         proj_var["variance"] = proj_var["total"] - proj_var["orig"]
         proj_var["variance_pct"] = proj_var["variance"] / proj_var["orig"] * 100
         proj_var = proj_var.sort_values("variance_pct")
- 
+
         if proj_var.empty:
             st.info("No projects with a non-zero original budget under these filters.")
         else:
@@ -843,18 +859,18 @@ with tab_finance:
                 margin=dict(l=10, r=40, t=10, b=10),
             )
             st.plotly_chart(fig6, use_container_width=True)
- 
+
         st.markdown("---")
         st.markdown("**PID variance leaderboard**")
         st.caption("Largest overruns and largest underspends, by £ variance (construction only)")
- 
+
         pid_var = fin_c.dropna(subset=["pid"]).groupby(
             ["pid", "district", "project"], dropna=False
         ).agg(total=("total", "sum"), orig=("orig", "sum")).reset_index()
         pid_var = pid_var[pid_var["orig"] != 0]
         pid_var["variance"] = pid_var["total"] - pid_var["orig"]
         pid_var["variance_pct"] = pid_var["variance"] / pid_var["orig"] * 100
- 
+
         if pid_var.empty:
             st.info("No PIDs with a non-zero original budget under these filters.")
         else:
@@ -879,6 +895,6 @@ with tab_finance:
                     .rename(columns={"pid": "PID", "district": "District", "project": "Project"}),
                     hide_index=True, use_container_width=True,
                 )
- 
+
 st.markdown("---")
 st.caption(f"Master Control Dashboard — data as of {date_max.date()}")
