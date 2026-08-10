@@ -492,6 +492,77 @@ def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, po
     return out
  
  
+@st.cache_data(show_spinner=False, max_entries=8)
+def render_pole_task_table_html(df: pd.DataFrame) -> str:
+    """Renders build_pole_task_table()'s output with the Pole column
+    merged (rowspan) across each pole's task rows and alternating
+    shading per pole group - the HTML/table equivalent of the workpacks
+    tool's Excel merge_column_runs()/pole banding, since st.dataframe has
+    no way to merge cells. Erect tasks are shown in red/bold, same as
+    the workpacks tool's docx highlighting."""
+    if df.empty:
+        return ""
+ 
+    def esc(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+ 
+    poles = df["Pole"].tolist()
+    tasks = df["Task"].tolist()
+    qtys = df["Qty"].tolist()
+    erects = df["Erect"].tolist()
+    n = len(poles)
+ 
+    band_colors = ["#ffffff", "#eef2f7"]
+    rows_html = []
+    i, band = 0, 0
+    while i < n:
+        j = i
+        while j + 1 < n and poles[j + 1] == poles[i]:
+            j += 1
+        span = j - i + 1
+        bg = band_colors[band % 2]
+        band += 1
+        for k in range(i, j + 1):
+            erect_style = "color:#dc2626;font-weight:600;" if erects[k] == "Yes" else ""
+            cells = []
+            if k == i:
+                cells.append(
+                    f"<td rowspan='{span}' style='background:{bg};font-weight:600;"
+                    f"vertical-align:top;padding:6px 10px;border:1px solid #e3e7ee;"
+                    f"white-space:nowrap;'>{esc(poles[k])}</td>"
+                )
+            cells.append(
+                f"<td style='background:{bg};padding:6px 10px;border:1px solid #e3e7ee;{erect_style}'>"
+                f"{esc(tasks[k])}</td>"
+            )
+            cells.append(
+                f"<td style='background:{bg};padding:6px 10px;border:1px solid #e3e7ee;"
+                f"text-align:right;white-space:nowrap;'>{esc(qtys[k])}</td>"
+            )
+            cells.append(
+                f"<td style='background:{bg};padding:6px 10px;border:1px solid #e3e7ee;"
+                f"text-align:center;'>{esc(erects[k])}</td>"
+            )
+            rows_html.append("<tr>" + "".join(cells) + "</tr>")
+        i = j + 1
+ 
+    header = (
+        "<tr style='background:#1e3a8a;color:#ffffff;'>"
+        "<th style='padding:8px 10px;text-align:left;'>Pole</th>"
+        "<th style='padding:8px 10px;text-align:left;'>Task (MD Poling)</th>"
+        "<th style='padding:8px 10px;text-align:right;'>Qty</th>"
+        "<th style='padding:8px 10px;text-align:center;'>Erect</th>"
+        "</tr>"
+    )
+    return (
+        "<div style='max-height:480px;overflow-y:auto;border:1px solid #e3e7ee;border-radius:8px;'>"
+        "<table style='width:100%;border-collapse:collapse;font-size:13px;'>"
+        f"<thead>{header}</thead><tbody>{''.join(rows_html)}</tbody></table></div>"
+    )
+ 
+ 
 @st.cache_data(max_entries=3)
 def read_file(file):
     """Returns (df, error_message). Never raises - a malformed upload
@@ -943,7 +1014,7 @@ with tab_jobs:
                         st.caption("No pole/task records for this date in the main dataset under the current filters.")
                     else:
                         st.caption(f"{pole_task_df['Pole'].nunique():,} pole(s) · {len(pole_task_df):,} task row(s)")
-                        st.dataframe(pole_task_df, use_container_width=True, hide_index=True, height=420)
+                        st.markdown(render_pole_task_table_html(pole_task_df), unsafe_allow_html=True)
  
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
@@ -1303,3 +1374,4 @@ with tab_totals:
                 by_project, height=280, use_container_width=True, hide_index=True,
                 column_config=GBP_COLUMN_CONFIG("Difference (£)"),
             )
+ 
