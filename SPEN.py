@@ -1,808 +1,1294 @@
-
-import datetime as dt
+import os
+import re
+import difflib
+import io
+from datetime import datetime
  
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+from streamlit_calendar import calendar as st_calendar
+from docx import Document
+from docx.shared import Pt
  
-# --------------------------------------------------------------------------
-# Config
-# --------------------------------------------------------------------------
+st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
-st.set_page_config(
-    page_title="Master Control — Job Costing Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# ============================================================
+# OUTAGES PROGRAMME (uploaded by the user - not read from the network)
+# ============================================================
+# Streamlit Cloud has no access to internal UNC/network paths, so the
+# workbook is uploaded via a file_uploader instead of read from disk.
  
-COLUMNS_NEEDED = [
-    "job", "plan1", "done", "datetouse", "invoice date", "total", "orig",
-    "district", "project", "project manager", "team", "team lider", "pid",
+ 
+@st.cache_data(show_spinner="Reading outage programme...", max_entries=3)
+def load_outage_programme(file_bytes: bytes):
+    """Cached on the uploaded file's bytes - re-parses only when a
+    different file (or a changed version of the same file) is uploaded,
+    not on every rerun/widget interaction.
+ 
+    Returns (df, error_message). Never raises - if the uploaded workbook
+    doesn't have a '2026' sheet in the expected layout, this should show a
+    clean st.error rather than crash the whole app."""
+    try:
+        df = pd.read_excel(
+            io.BytesIO(file_bytes),
+            sheet_name="2026",
+            header=6,                     # Excel row 7 is the header row (0-indexed = 6)
+            usecols="A,B,C,E,F,G,L,M,N",  # District, Outage Date, Weekday, Scheme, Outage #, Circuit, PID, SPEN PM, POI
+            engine="openpyxl",
+        )
+        df.columns = [
+            "District", "Outage Date", "Weekday", "Scheme",
+            "Outage #", "Circuit", "PID", "SPEN PM", "POI",
+        ]
+        df = df.dropna(how="all")
+        df["Outage Date"] = pd.to_datetime(df["Outage Date"], errors="coerce")
+        return df, None
+    except Exception as e:
+        return None, str(e)
+ 
+ 
+# ============================================================
+# YOUR MAPPING DICTIONARIES
+# ============================================================
+CV7_erect = {
+    "Erect Single HV/EHV Pole, up to and including 12 metre pole": "CV7 HV pole",
+    "Erect Single HV/EHV Pole, up to and including 12 metre pole.": "CV7 HV pole",
+}
+CV7_erect_H = {
+    "Erect Section Structure 'H' HV/EHV Pole, up to and including 12 metre pole.": "CV7 HV pole"
+}
+CV7_erect_lv = {
+    "Erect LV Structure Single Pole, up to and including 12 metre pole": "CV7 LV pole",
+}
+CV7_recover = {
+    "Recover single pole, up to and including 15 metres in height, and reinstate, all ground conditions": "CV7",
+    "Recover 'A' / 'H' pole, up to and including 15 metres in height, and reinstate, all ground conditions": "CV7 HV pole",
+}
+CV7_Tx = {
+    "Erect pole mounted transformer up to 100kVA 1.ph.": "CV7 Tx",
+    "Erect pole mounted transformer up to 200kVA 3.p.h.": "CV7 Tx",
+    "Erect Voltage Regulator.": "CV7 Tx",
+    "Erect Voltage Transformer (VT), RTU or Repeater": "CV7 Tx",
+    "Erect 12kV/36kV Surge arrestors ( directly mounted ).": "CV7 Tx",
+    "Remove pole mounted tranformer.": "CV7 Tx",
+    "Remove platform mounted or 'H' pole mounted transformer.": "CV7 Tx",
+}
+transformer = {
+    "Transformer 1ph 50kVA": "TX 1ph (50kVA)",
+    "Transformer 3ph 50kVA": "TX 3ph (50kVA)",
+    "Transformer 1ph 100kVA": "TX 1ph (100kVA)",
+    "Transformer 1ph 25kVA": "TX 1ph (25kVA)",
+    "Transformer 3ph 200kVA": "TX 3ph (200kVA)",
+    "Transformer 3ph 100kVA": "TX 3ph (100kVA)",
+}
+CV7_OHL_CONDUCTOR_instal = {
+    "Install bare conductor, run out, sag, terminate, bind in and connect jumpers; <100mm²": "CV7 OHL CONDUCTOR",
+    "Install bare conductor, run out, sag, terminate, bind in and connect jumpers; >=100mm² <200mm²": "CV7 OHL CONDUCTOR",
+    "Install conductor, run out, sag, terminate, clamp in and form jumper loops; >=200mm²": "CV7 OHL CONDUCTOR",
+}
+CV7_OHL_CONDUCTOR_recover = {
+    "Recover overhead wire and fittings; HV/EHV overhead line or Hardex Pilot (1 conductor)": "CV7 OHL CONDUCTOR",
+    "Recover overhead wire and fittings; HV/EHV overhead line or Hardex Pilot (2 conductor)": "CV7 OHL CONDUCTOR",
+    "Recover overhead wire and fittings; HV/EHV overhead line or Hardex Pilot (3 conductor)": "CV7 OHL CONDUCTOR",
+}
+CV7_OHL_CONDUCTOR_LV_instal = {
+    "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 2c": "CV7 OHL CONDUCTOR LV",
+    "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 4c": "CV7 OHL CONDUCTOR LV",
+    "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 2c + Earth": "CV7 OHL CONDUCTOR LV",
+    "Install conductor, run out, sag, terminate, clamp in and connect jumpers; 4c + Earth": "CV7 OHL CONDUCTOR LV",
+}
+CV7_OHL_CONDUCTOR_LV_recover = {
+    "Recover overhead wires and fittings; LV openwire overhead line (2 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover overhead wires and fittings; LV openwire overhead line (3 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover overhead wires and fittings; LV openwire overhead line (4 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover overhead wires and fittings; LV openwire overhead line (5 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover overhead wires and fittings; LV service overhead line (open, concentric or ABC, 2 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover overhead wires and fittings; LV service overhead line (open, concentric or ABC, 3 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover overhead wires and fittings; LV service overhead line (open, concentric or ABC, 4 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover overhead wires and fittings; LV service overhead line (open, concentric or ABC, 5 conductors)": "CV7 OHL CONDUCTOR LV",
+    "Recover cleated service": "CV7 OHL CONDUCTOR LV",
+}
+Switch = {
+    "Noja": "Noja",
+    "11kV PMSW (Soule)": "11kV PMSW (Soule)",
+    "11kv ABSW Hookstick Standard": "11kv ABSW Hookstick Standard",
+    "11kv ABSW Hookstick Spring loaded mech": "11kv ABSW Hookstick Spring loaded mech",
+    "33kv ABSW Hookstick Dependant": "33kv ABSW Hookstick Dependant",
+}
+Fuses = {
+    "100A LV Fuse JPU 82.5mm": "100A LV Fuse JPU 82.5mm",
+    "160A LV Fuse JPU 82.5mm": "160A LV Fuse JPU 82.5mm",
+    "200A LV Fuse JPU 82.5mm": "200A LV Fuse JPU 82.5mm",
+    "315A LV Fuse JPU 82.5mm": "315A LV Fuse JPU 82.5mm",
+    "400A LV Fuse JPU 82.5mm": "400A LV Fuse JPU 82.5mm",
+    "200A LV Fuse JSU 92mm": "200A LV Fuse JSU 92mm",
+    "315A LV Fuse JSU 92mm": "315A LV Fuse JSU 92mm",
+    "400A LV Fuse JSU 92mm": "400A LV Fuse JSU 92mm",
+    "100A LV Fuse - Porcelain screw-in": "100A LV Fuse - Porcelain screw-in",
+    "160A LV Fuse - Porcelain screw-in": "160A LV Fuse - Porcelain screw-in",
+    "200A LV Fuse - Porcelain screw-in": "200A LV Fuse - Porcelain screw-in",
+    "Single Phase cut out kit 100A Henley Series 7": "Single Phase cut out kit 100A Henley Series 7",
+    "Three Phase cut out kit 100A Henley Series 7": "Three Phase cut out kit 100A Henley Series 7",
+    "Three Phase 200A Cut out": "Three Phase 200A Cut out",
+    "Cut out Fuse (MF) 60A": "Cut out Fuse (MF) 60A",
+    "Cut out Fuse (MF) 80A": "Cut out Fuse (MF) 80A",
+    "Cut out Fuse (MF) 100A": "Cut out Fuse (MF) 100A",
+    "11KV FUSE UNIT - C-TYPE": "11KV FUSE UNIT - C-TYPE",
+    "11KV SOLID LINK - C-TYPE": "11KV SOLID LINK - C-TYPE",
+    "11KV OHL ASL C-TYPE RESET 20A 2 SHOT": "11KV OHL ASL C-TYPE RESET 20A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 25A 2 SHOT": "11KV OHL ASL C-TYPE RESET 25A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 40A 1 SHOT": "11KV OHL ASL C-TYPE RESET 40A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 40A 2 SHOT": "11KV OHL ASL C-TYPE RESET 40A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 1 SHOT": "11KV OHL ASL C-TYPE RESET 63A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 2 SHOT": "11KV OHL ASL C-TYPE RESET 63A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 63A 3 SHOT": "11KV OHL ASL C-TYPE RESET 63A 3 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 1 SHOT": "11KV OHL ASL C-TYPE RESET 100A 1 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 2 SHOT": "11KV OHL ASL C-TYPE RESET 100A 2 SHOT",
+    "11KV OHL ASL C-TYPE RESET 100A 3 SHOT": "11KV OHL ASL C-TYPE RESET 100A 3 SHOT",
+    "11KV OHL FUSE ELEMENT C-TYPE 15A": "11KV OHL FUSE ELEMENT C-TYPE 15A",
+    "11KV OHL FUSE ELEMENT C-TYPE 25A": "11KV OHL FUSE ELEMENT C-TYPE 25A",
+    "11KV OHL FUSE ELEMENT C-TYPE 30A": "11KV OHL FUSE ELEMENT C-TYPE 30A",
+    "11KV OHL FUSE ELEMENT C-TYPE 40A": "11KV OHL FUSE ELEMENT C-TYPE 40A",
+    "11KV OHL FUSE ELEMENT C-TYPE 50A": "11KV OHL FUSE ELEMENT C-TYPE 50A",
+    "11KV OHL ASL DJP-TYPE 20A 2 SHOT": "11KV OHL ASL DJP-TYPE 20A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 25A 1 SHOT": "11KV OHL ASL DJP-TYPE 25A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 25A 2 SHOT": "11KV OHL ASL DJP-TYPE 25A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 40A 1 SHOT": "11KV OHL ASL DJP-TYPE 40A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 40A 2 SHOT": "11KV OHL ASL DJP-TYPE 40A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 1 SHOT": "11KV OHL ASL DJP-TYPE 63A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 2 SHOT": "11KV OHL ASL DJP-TYPE 63A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 63A 3 SHOT": "11KV OHL ASL DJP-TYPE 63A 3 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 1 SHOT": "11KV OHL ASL DJP-TYPE 100A 1 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 2 SHOT": "11KV OHL ASL DJP-TYPE 100A 2 SHOT",
+    "11KV OHL ASL DJP-TYPE 100A 3 SHOT": "11KV OHL ASL DJP-TYPE 100A 3 SHOT",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 15A": "11KV OHL FUSE ELEMENT DJP-TYPE 15A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 25A": "11KV OHL FUSE ELEMENT DJP-TYPE 25A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 30A": "11KV OHL FUSE ELEMENT DJP-TYPE 30A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 40A": "11KV OHL FUSE ELEMENT DJP-TYPE 40A",
+    "11KV OHL FUSE ELEMENT DJP-TYPE 50A": "11KV OHL FUSE ELEMENT DJP-TYPE 50A",
+}
+CV31 = {
+    "Replace / Fit safety or warning sign, number plates or name plate": "CV31",
+    "Barbed Wire Wrap ACD (or Enhanced) single pole or stay - Replace/Repair": "CV31",
+    "Steelwork bonding repair / fit.": "CV31",
+    "Replace LV/HV/Earth guard missing / damaged.": "CV31",
+}
+CV8 = {
+    "Tighten existing stay.": "CV8",
+    "Erect/Replace stay above ground only.": "CV8",
+    "Erect/Replace stay complete including block or driven type anchor": "CV8",
+    "Erect/Replace stay complete including rock type anchor": "CV8",
+    "Retrofit structure with Anchor Clamp fitting for Section / Angle / Terminal support": "CV8",
+    "Erect Single Crossarm to single pole.": "CV8",
+    "Erect Double Crossarm 'H' Pole formation": "CV8",
+    "Remove Steelwork crossarm item only": "CV8",
+    "Change 11kV Insulators to avoid contamination from old conductor": "CV8",
+    "Change 33kV Insulators to avoid contamination from old conductor": "CV8",
+    "Replace tension insulator, 11kV.": "CV8",
+    "Replace tension insulator, 33kV.": "CV8",
+    "Additional cost for fitting Stay Outrigger Bracket": "CV8",
+    "Additional cost for fitting Angle / Terminal stay attachment plates on Heavy Construction as SP4009862": "CV8",
+    "Recover and reinstate stay position,all ground conditions.": "CV8",
+    "Fit foundation block to existing pole.": "CV8",
+    "Fit bog shoe foundation to existing single pole.": "CV8",
+    "Replace jumper / dropper mechanical connection with compression connection": "CV8",
+    "Replace jumper / dropper with live line bail and flexible jumper conductor": "CV8",
+    "Replace / Repair conductor with mid span joint using compression connection": "CV8",
+    "Conductor repair; piece in conductor including compression joints": "CV8",
+    "Bind In Conductors; 1.ph 11kV Intermediate / Pin Angle pole.": "CV8",
+    "Bind In Conductors; 3.ph 11kV Intermediate / Pin Angle pole.": "CV8",
+    "Conductor Terminations - 1.ph 11kV Section pole including jumpers.": "CV8",
+    "Conductor Terminations - 3.ph 11kV Section pole including jumpers.": "CV8",
+    "Conductor Terminations - 1.ph 11kV Terminal pole.": "CV8",
+    "Conductor Terminations - 3.ph 11kV Terminal pole.": "CV8",
+    "Unbind and reregulate existing conductors": "CV8",
+    "Convert 1.ph 11kV Intermediate pole into Section Pole.": "CV8",
+    "Convert 1.ph/3.p.h. 11kV line pole into Terminal Pole.": "CV8",
+    "Convert 3.ph 11kV Intermediate pole into Section Pole.": "CV8",
+    "Replace 11kV/33kV insulator pin and insulator, including unbinding and binding in": "CV8",
+    "Replace 11kV/33kV insulator binder": "CV8",
+    "Replace tension insulator, 11kV": "CV8",
+    "Replace tension insulator, 33kV": "CV8",
+    "Replace 11kV/33kV dead end termination": "CV8",
+    "Additional cost for erection of pilot pin and insulator or pilot post insulator (11kV or 33kV)": "CV8",
+    "Replace insulated conductor HV/LV earth above ground to first rod": "CV8",
+    "Install Copper Covered Green / Yellow HV Earth or Black LV Earth to foot of pole": "CV8",
+    "Install EHV/ HV Earth Electrode including excavate & reinstate (up to 8mtrs)": "CV8",
+    "Install LV Earth Electrode including excavate & reinstate (up to 28mtrs)": "CV8",
+    "Additional extra over for additional earthing excavated, laid & backfilled": "CV8",
+    "Install Earth Electrode within cable trench": "CV8",
+    "Erect 11kV Cable Termination ( incorporating surge arrestors )": "CV8",
+    "Erect 33kV Cable Termination ( incorporating surge arrestors )": "CV8",
+    "Steelwork bonding repair / fit": "CV8",
+    "Erect 1.ph LV cable pole termination": "CV8",
+    "Erect 3.ph LV cable pole termination": "CV8",
+    "Remove 11kV/33kV Cable termination": "CV8",
+    "Remove LV cable termination": "CV8",
+    "Repair pole twist - including unbind / rebind.": "CV8",
+}
+ 
+POLE_CATEGORIES = {
+    "CV7_erect": CV7_erect,
+    "CV7_erect_H": CV7_erect_H,
+    "CV7_erect_lv": CV7_erect_lv,
+    "CV7_recover": CV7_recover,
+}
+ 
+# Friendly labels for the pole chart/cards, in the "Display (technical_name)"
+# style so it's obvious which export-tool category each bar corresponds to.
+POLE_DISPLAY_NAMES = {
+    "CV7_erect": "CV7 (CV7_erect)",
+    "CV7_erect_H": "CV7 H Pole (CV7_erect_H)",
+    "CV7_erect_lv": "CV7 LV Pole (CV7_erect_lv)",
+    "CV7_recover": "CV7 Recover (CV7_recover)",
+}
+ 
+# NOTE: CV7_SWITCHGEAR / CV7_UG / CV7_CB were removed from ALL_CATEGORIES.
+# In the export tool, `categories` gets redefined a second time and that
+# second definition (the one actually used to build sheets/Summary) never
+# includes these three - so the exporter never produces a "true" value for
+# them. Showing cards for them here would just be comparing against
+# nothing. If you do want them tracked, they need to be added back into
+# the export tool's `categories`/`extra_categories` lists first.
+ALL_CATEGORIES = {
+    **POLE_CATEGORIES,
+    "CV7_Tx": CV7_Tx,
+    "transformer": transformer,
+    "CV7_OHL_CONDUCTOR_instal": CV7_OHL_CONDUCTOR_instal,
+    "CV7_OHL_CONDUCTOR_recover": CV7_OHL_CONDUCTOR_recover,
+    "CV7_OHL_CONDUCTOR_LV_instal": CV7_OHL_CONDUCTOR_LV_instal,
+    "CV7_OHL_CONDUCTOR_LV_recover": CV7_OHL_CONDUCTOR_LV_recover,
+    "Switch": Switch,
+    "Fuses": Fuses,
+    "CV31": CV31,
+    "CV8": CV8,
+}
+ 
+# Categories that use the exporter's process_cv() logic instead of a plain
+# sum: dedupe by pole, drop zero-qty rows, exclude poles already counted
+# under a CV7 erect/recover item, then COUNT distinct poles (not sum qty).
+POLE_DEDUPE_CATEGORIES = {"CV8", "CV31"}
+ 
+# Switch is split into three sub-types for display instead of one lump
+# card. Each key is the display name, each value is the list of raw
+# descriptions (as written in the Switch dict above) that count toward it.
+SWITCH_SUBTYPES = {
+    "Noja": ["Noja"],
+    "Soule": ["11kV PMSW (Soule)"],
+    "ABSW": [
+        "11kv ABSW Hookstick Standard",
+        "11kv ABSW Hookstick Spring loaded mech",
+        "33kv ABSW Hookstick Dependant",
+    ],
+}
+ 
+# ============================================================
+# IMAGE GROUPS for the Mapped Items tab
+# Images live in an "Images" folder alongside this script (same repo path).
+# "image": None means the group is shown without an image (no warning).
+# Any category not listed in a group's "categories" (or covered by
+# "subtypes") falls through to the "Other items" section at the end.
+# ============================================================
+IMAGE_DIR = "Images"
+CARD_GROUPS = [
+    {
+        "title": "Poles",
+        "image": os.path.join(IMAGE_DIR, "Poles.png"),
+        "categories": ["CV7_recover", "CV7_erect", "CV7_erect_H", "CV7_erect_lv"],
+    },
+    {
+        "title": "Transformers",
+        "image": os.path.join(IMAGE_DIR, "Transformer.png"),
+        "categories": ["CV7_Tx", "transformer"],
+    },
+    {
+        "title": "Conductor",
+        "image": os.path.join(IMAGE_DIR, "Cable.png"),
+        "categories": [
+            "CV7_OHL_CONDUCTOR_instal",
+            "CV7_OHL_CONDUCTOR_recover",
+            "CV7_OHL_CONDUCTOR_LV_instal",
+            "CV7_OHL_CONDUCTOR_LV_recover",
+        ],
+    },
+    {
+        "title": "Switch gear",
+        "image": os.path.join(IMAGE_DIR, "Switchgear.png"),
+        "subtypes": SWITCH_SUBTYPES,
+    },
 ]
  
-COLOR_GREEN = "#1E9E5A"      # positive variation
-COLOR_RED = "#D64545"        # negative variation / PID tab — remaining
-COLOR_YELLOW = "#F0B429"     # materials
-COLOR_NAVY = "#1F3A5F"       # "the rest" / base (construction, Panel 1)
-COLOR_DARKBLUE = "#123A6B"   # PID tab — done
-COLOR_TEAL = "#2C7DA0"       # PID tab — total (KPI accent)
-COLOR_AMBER = "#E0A02A"      # PID tab — planned
-COLOR_PURPLE = "#7C5CBF"     # PID tab — invoiced
-COLOR_MUTED = "#B7BFC9"
+HV_POLE_KEY = "Recover 'A' / 'H' pole, up to and including 15 metres in height, and reinstate, all ground conditions"
+HV_POLE_MULTIPLIER = 2
  
-CATEGORY_PALETTE = [
-    "#2C7DA0", "#E0A02A", "#7C5CBF", "#1E9E5A", "#D64545",
-    "#2F9E9E", "#A85CB0", "#7C8C2A", "#C25C82", "#4C6FC2",
-]
- 
-TEXT_DARK = "#1B2430"
-TEXT_MUTED = "#5B6B7C"
-GRID_LIGHT = "#E2E7ED"
-PANEL_BG = "#FFFFFF"
- 
-PLOTLY_LIGHT = dict(
-    paper_bgcolor=PANEL_BG,
-    plot_bgcolor=PANEL_BG,
-    font=dict(color=TEXT_DARK, family="IBM Plex Mono, monospace", size=13),
-)
+# ============================================================
+# HELPERS (aligned with the export script's normalization)
+# ============================================================
+def normalize_item(x):
+    if pd.isna(x):
+        return ""
+    s = str(x).replace("\u200b", "").replace("\u200e", "").replace("\u200f", "").replace("\xa0", "").strip().upper()
+    return re.sub(r"\s+", " ", s)
  
  
-# --------------------------------------------------------------------------
-# Data loading
-# --------------------------------------------------------------------------
+def normalize_pole(p):
+    """Mirrors the export tool's normalize_pole(): strips zero-width/
+    directional/nbsp characters, uppercases, and removes ALL whitespace
+    (not just collapsing it) so pole IDs compare exactly like the exporter."""
+    if pd.isna(p):
+        return ""
+    s = str(p).replace("\u200b", "").replace("\u200e", "").replace("\u200f", "").replace("\xa0", "").strip().upper()
+    return re.sub(r"\s+", "", s)
  
-@st.cache_data(show_spinner="Loading Master Control data…")
-def load_data(file) -> pd.DataFrame:
-    df = pd.read_parquet(file, columns=COLUMNS_NEEDED)
  
-    # total / orig sometimes land as text — coerce to numeric
-    df["total"] = pd.to_numeric(df["total"], errors="coerce")
-    df["orig"] = pd.to_numeric(df["orig"], errors="coerce")
+def clean_job(value):
+    """Strip leading 'C -'/'M -' prefix, cut at 'map', drop SPxxxx/GSPxxxx/bare digits."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    text = re.sub(r'^[A-Za-z]\s*-\s*', '', text)
+    m = re.search(r'map', text, flags=re.IGNORECASE)
+    if m:
+        text = text[: m.start()]
+    text = re.sub(r'\bGSP\d+\b', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bSP\d+\b', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b\d+\b', '', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+    text = re.sub(r'^[\s\-\u2013_,.:]+|[\s\-\u2013_,.:]+$', '', text)
+    return text.strip()
  
-    for c in ["plan1", "done", "datetouse", "invoice date"]:
-        df[c] = pd.to_datetime(df[c], errors="coerce")
  
-    for c in ["district", "project", "project manager", "team", "team lider", "pid", "job"]:
-        df[c] = df[c].astype("string").str.strip()
-        df[c] = df[c].replace("", pd.NA)
+# Native unit each category's qsub is recorded in - used to format the
+# mapped-item cards for conductor lengths.
+UNIT_CONFIG = {
+    "CV7_OHL_CONDUCTOR_recover": "m",
+    "CV7_OHL_CONDUCTOR_LV_recover": "m",
+    "CV7_OHL_CONDUCTOR_instal": "km",
+    "CV7_OHL_CONDUCTOR_LV_instal": "km",
+}
  
-    job_lower = df["job"].str.lower()
-    df["flag"] = "other"
-    df.loc[job_lower.str.startswith(("m -", "m-"), na=False), "flag"] = "material"
-    df.loc[job_lower.str.startswith(("c -", "c-"), na=False), "flag"] = "construction"
-    df = df[df["flag"] != "other"].copy()
  
-    # datetouse sometimes carries a placeholder ~1900 date for "no date" — treat as missing
-    df["datetouse"] = df["datetouse"].where(df["datetouse"].dt.year > 1901)
+def format_length(value, native_unit):
+    """Converts value (in native_unit) to meters, then displays in km if
+    the meters equivalent is >=1000, otherwise in meters."""
+    meters = value * 1000 if native_unit == "km" else value
+    if meters >= 1000:
+        return f"{meters / 1000:,.2f} km"
+    return f"{meters:,.0f} m"
+ 
+ 
+def dedupe_jobs(values, threshold=0.65):
+    kept, is_dup = [], []
+    for v in values:
+        if not v:
+            is_dup.append(False)
+            continue
+        hit = any(difflib.SequenceMatcher(None, v.lower(), k.lower()).ratio() >= threshold for k in kept)
+        is_dup.append(hit)
+        if not hit:
+            kept.append(v)
+    return is_dup
+ 
+ 
+def show_total_banner(label, value_str):
+    """A large, centered KPI number - meant to sit directly under a chart's
+    subheader so the total is the first thing seen after the title."""
+    st.markdown(
+        f"""
+        <div style="text-align:center; padding: 4px 0 18px 0;">
+            <div style="font-size:2.6rem; font-weight:800; color:#1e3a8a; line-height:1.15;">{value_str}</div>
+            <div style="font-size:0.9rem; color:#475569; text-transform:uppercase; letter-spacing:0.05em;">{label}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+ 
+ 
+def generate_outage_docx(day_df: pd.DataFrame, selected_date) -> bytes:
+    """Work Instructions for a single calendar date - same idea as the
+    workpacks tool's generate_pole_docx(): one bullet per job, key facts
+    bolded up front, everything else tucked into parentheses after it.
+    This sheet doesn't carry MD Poling/pole/qsub/comment columns like the
+    workpacks master parquet does, so the bullet is built from whatever
+    of District/Scheme/Outage #/Circuit/PID/SPEN PM/POI is actually filled
+    in for that row, rather than assuming a fixed set of columns."""
+    doc = Document()
+    doc.add_heading(f"Work Instructions — {selected_date:%d %b %Y}", level=1)
+    doc.add_paragraph(f"Generated: {datetime.now():%Y-%m-%d %H:%M}")
+    doc.add_paragraph(f"Total outages: {len(day_df)}")
+    doc.add_paragraph("")
+ 
+    def _clean(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        s = str(v).strip()
+        return "" if s.lower() in ("", "nan", "none", "nat") else s
+ 
+    for _, row in day_df.iterrows():
+        district = _clean(row.get("District"))
+        scheme = _clean(row.get("Scheme"))
+        pid = _clean(row.get("PID"))
+ 
+        p = doc.add_paragraph(style="List Bullet")
+        p.paragraph_format.space_after = Pt(6)
+ 
+        headline = " — ".join(b for b in (district, scheme or "Outage") if b) or "Outage"
+        run_main = p.add_run(headline)
+        run_main.bold = True
+ 
+        extras = []
+        for label, key in [
+            ("PID", "PID"), ("Circuit", "Circuit"), ("Outage #", "Outage #"),
+            ("SPEN PM", "SPEN PM"), ("POI", "POI"), ("Weekday", "Weekday"),
+        ]:
+            val = _clean(row.get(key))
+            if val:
+                extras.append(f"{label}: {val}")
+        if extras:
+            p.add_run("  (" + "; ".join(extras) + ")")
+ 
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+ 
+ 
+@st.cache_data(max_entries=3)
+def read_file(file):
+    """Returns (df, error_message). Never raises - a malformed upload
+    should show a clean st.error, not crash the whole app."""
+    try:
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_parquet(file)
+        df.columns = df.columns.str.strip().str.lower()
+        return df, None
+    except Exception as e:
+        return None, str(e)
+ 
+ 
+@st.cache_data(show_spinner="Processing data...", max_entries=3)
+def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
+    """cols: the resolved {logical_name: real_column_name} mapping picked in the sidebar.
+ 
+    Cached: Streamlit reruns the whole script on every filter/widget change,
+    which would otherwise re-run normalize_item() over every row and rebuild
+    the category lookup on every single interaction. This only recomputes
+    when the uploaded data or the column mapping actually changes."""
+    df = df.copy()
+    item_col = cols["item_col"]
+    qsub_col = cols["qsub_col"]
+ 
+    df["_item_norm"] = df[item_col].apply(normalize_item)
+ 
+    # Raw (un-adjusted) quantity - mirrors what process_cv() reads directly
+    # from "qsub" in the export tool, before any HV-multiplier adjustment.
+    df["_qsub_raw"] = pd.to_numeric(df[qsub_col], errors="coerce").fillna(0)
+ 
+    # HV pole recovery counts double (applied like the export tool's
+    # df.loc[hv_pole_mask, col] *= HV_POLE_MULTIPLIER)
+    hv_key_norm = normalize_item(HV_POLE_KEY)
+    hv_mask = df["_item_norm"] == hv_key_norm
+    df["_qsub_adj"] = df["_qsub_raw"]
+    df.loc[hv_mask, "_qsub_adj"] *= HV_POLE_MULTIPLIER
+ 
+    # map every item to its category
+    item_to_cat = {}
+    for cat_name, mapping in ALL_CATEGORIES.items():
+        for desc, label in mapping.items():
+            item_to_cat[normalize_item(desc)] = label
+    df["_mapped_category"] = df["_item_norm"].map(item_to_cat)
+ 
+    # normalized pole/enid, needed for CV8/CV31 pole-dedupe logic
+    pole_col = cols.get("pole_col")
+    if pole_col and pole_col in df.columns:
+        df["_pole_norm"] = df[pole_col].apply(normalize_pole)
+    else:
+        df["_pole_norm"] = ""
+ 
+    # cleaned job column
+    job_col = cols.get("job_col")
+    if job_col and job_col in df.columns:
+        df["_job_clean"] = df[job_col].apply(clean_job)
+    else:
+        df["_job_clean"] = ""
+ 
+    # date column
+    date_col = cols.get("date_col")
+    df["_date"] = pd.to_datetime(df[date_col], errors="coerce") if date_col and date_col in df.columns else pd.NaT
  
     return df
  
  
-# --------------------------------------------------------------------------
-# Formatting helpers
-# --------------------------------------------------------------------------
- 
-def fmt_money(v: float) -> str:
-    if pd.isna(v):
-        v = 0.0
-    sign = "-" if v < 0 else ""
-    return f"{sign}£{abs(v):,.2f}"
- 
- 
-def fmt_money_short(v: float) -> str:
-    if pd.isna(v):
-        v = 0.0
-    sign = "-" if v < 0 else ""
-    a = abs(v)
-    if a >= 1_000_000:
-        return f"{sign}£{a/1_000_000:.1f}m"
-    if a >= 1_000:
-        return f"{sign}£{a/1_000:.1f}k"
-    return f"{sign}£{a:.0f}"
+def cv7_dedupe_poles(frame: pd.DataFrame) -> set:
+    """Poles already covered by a CV7 erect/recover item - mirrors the
+    export tool's cv7_poles = cv7_set(df, CV7_erect) | cv7_set(df, CV7_erect_H)
+    | cv7_set(df, CV7_erect_lv) | cv7_set(df, CV7_recover)."""
+    keys = set()
+    for mapping in POLE_CATEGORIES.values():
+        keys |= {normalize_item(k) for k in mapping}
+    poles = set(frame.loc[frame["_item_norm"].isin(keys), "_pole_norm"].dropna())
+    poles.discard("")
+    return poles
  
  
-def auto_granularity(date_from: dt.date, date_to: dt.date) -> str:
-    days = (date_to - date_from).days
-    if days <= 31:
-        return "Day"
-    if days <= 180:
-        return "Week"
-    if days <= 900:
-        return "Month"
-    return "Year"
+def cv_pole_resume(frame: pd.DataFrame, mapping: dict, cv7_poles: set) -> pd.DataFrame:
+    """Mirrors the export tool's process_cv(): filter by item, drop
+    zero-qty rows, dedupe by pole (keep first), exclude poles already
+    counted under CV7. The resulting row count == the exporter's metric."""
+    keys = {normalize_item(k) for k in mapping}
+    sub = frame[frame["_item_norm"].isin(keys)].copy()
+    sub = sub[sub["_qsub_raw"] != 0]
+    sub = sub.drop_duplicates(subset="_pole_norm")
+    sub = sub[~sub["_pole_norm"].isin(cv7_poles)]
+    return sub
  
  
-def bucket_series(dates: pd.Series, granularity: str) -> pd.Series:
-    if granularity == "Day":
-        return dates.dt.to_period("D").dt.start_time
-    if granularity == "Week":
-        return dates.dt.to_period("W-MON").dt.start_time
-    if granularity == "Month":
-        return dates.dt.to_period("M").dt.start_time
-    return dates.dt.to_period("Y").dt.start_time
+def build_card(frame: pd.DataFrame, cat_name: str, mapping: dict, cv7_poles: set):
+    """Returns (cat_name, total_qty, sub) for a single category, filtered
+    strictly by that category's OWN item keys - never by the shared
+    "_mapped_category" label, since several categories map to the same
+    label (e.g. CV7_erect and CV7_erect_H both -> "CV7 HV pole") and
+    grouping by label would merge their counts together."""
+    if cat_name in POLE_DEDUPE_CATEGORIES:
+        sub = cv_pole_resume(frame, mapping, cv7_poles)
+        if sub.empty:
+            return None
+        return (cat_name, len(sub), sub)
+    else:
+        keys = {normalize_item(k) for k in mapping}
+        sub = frame[frame["_item_norm"].isin(keys)]
+        if sub.empty:
+            return None
+        return (cat_name, sub["_qsub_adj"].sum(), sub)
  
  
-def bucket_label(ts: pd.Timestamp, granularity: str) -> str:
-    if granularity == "Day":
-        return ts.strftime("%-d %b") if hasattr(ts, "strftime") else str(ts)
-    if granularity == "Week":
-        return "w/c " + ts.strftime("%-d %b")
-    if granularity == "Month":
-        return ts.strftime("%b %Y")
-    return ts.strftime("%Y")
+def build_subtype_card(frame: pd.DataFrame, subtype_name: str, descriptions: list):
+    keys = {normalize_item(d) for d in descriptions}
+    sub = frame[frame["_item_norm"].isin(keys)]
+    if sub.empty:
+        return None
+    return (subtype_name, sub["_qsub_adj"].sum(), sub)
  
  
-def metric_row(items):
-    """items: list of (label, value_str, accent_color_or_None, highlight_bool)"""
-    cols = st.columns(len(items))
-    for col, (label, value, color, highlight) in zip(cols, items):
-        with col:
-            if highlight:
-                box_bg = "#EAF3EC"
-                box_border = color or COLOR_NAVY
-                value_size = "26px"
-                label_color = TEXT_DARK
-                border_style = f"border:1px solid {box_border};border-left:5px solid {box_border};"
-            else:
-                box_bg = "#F6F8FA"
-                value_size = "18px"
-                label_color = TEXT_MUTED
-                border_style = "border:1px solid #DDE3E9;"
-            val_style = f"color:{color};" if color else f"color:{TEXT_DARK};"
-            st.markdown(
-                f"""
-                <div style="{border_style}border-radius:6px;padding:10px 14px;background:{box_bg};">
-                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;
-                              text-transform:uppercase;color:{label_color};margin-bottom:4px;">{label}</div>
-                  <div style="font-family:'IBM Plex Mono',monospace;font-size:{value_size};font-weight:700;{val_style}">{value}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+def render_metric(slot, cat_name: str, total_qty, display_name: str = None):
+    label = display_name or cat_name
+    if cat_name in UNIT_CONFIG:
+        slot.metric(label, format_length(total_qty, UNIT_CONFIG[cat_name]))
+    elif cat_name in POLE_DEDUPE_CATEGORIES:
+        slot.metric(label, f"{total_qty:,.0f} poles")
+    else:
+        slot.metric(label, f"{total_qty:,.0f}")
  
  
-# --------------------------------------------------------------------------
-# Sidebar — data source + filters
-# --------------------------------------------------------------------------
- 
-st.sidebar.title("Master Control")
-st.sidebar.caption("Job costing & progress — construction / materials")
- 
-st.sidebar.markdown("### Data source")
-uploaded = st.sidebar.file_uploader(
-    "Upload Master Control parquet",
-    type=["parquet"],
-    help="Drop in the latest export each time — nothing is stored between sessions.",
-)
- 
-if uploaded is None:
-    st.title("Master Control — Job Costing Dashboard")
-    st.info("⬅️ Upload the latest Master Control parquet file in the sidebar to get started.")
-    st.stop()
- 
-df = load_data(uploaded)
- 
-date_min = df["datetouse"].min()
-date_max = df["datetouse"].max()
- 
-st.sidebar.markdown("### Filters")
- 
-date_range = st.sidebar.date_input(
-    "Date range",
-    value=(date_min.date(), date_max.date()),
-    min_value=date_min.date(),
-    max_value=date_max.date(),
-)
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    date_from, date_to = date_range
-else:
-    date_from, date_to = date_min.date(), date_max.date()
- 
-districts = st.sidebar.multiselect("District", sorted(df["district"].dropna().unique()))
-projects = st.sidebar.multiselect("Project", sorted(df["project"].dropna().unique()))
-pids = st.sidebar.multiselect("PID", sorted(df["pid"].dropna().unique()))
-pms = st.sidebar.multiselect("Project Manager", sorted(df["project manager"].dropna().unique()))
- 
-gran_choice = st.sidebar.selectbox("Date grouping", ["Auto", "Day", "Week", "Month", "Year"])
- 
-if st.sidebar.button("Reset filters"):
-    st.rerun()
- 
-# --------------------------------------------------------------------------
-# Apply filters
-# --------------------------------------------------------------------------
- 
-mask = pd.Series(True, index=df.index)
-if districts:
-    mask &= df["district"].isin(districts)
-if projects:
-    mask &= df["project"].isin(projects)
-if pids:
-    mask &= df["pid"].isin(pids)
-if pms:
-    mask &= df["project manager"].isin(pms)
- 
-fdf = df[mask].copy()
- 
-date_mask = fdf["datetouse"].notna() & (fdf["datetouse"].dt.date >= date_from) & (fdf["datetouse"].dt.date <= date_to)
-fdf_dated = fdf[date_mask].copy()
- 
-granularity = auto_granularity(date_from, date_to) if gran_choice == "Auto" else gran_choice
- 
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    f"<span style='font-family:monospace;font-size:12px;color:#7C8AA0;'>"
-    f"RECORDS IN VIEW: <b style='color:#E3A64A;'>{len(fdf_dated):,}</b></span>",
+# ============================================================
+# APP
+# ============================================================
+st.markdown(
+    """
+    <style>
+    div[data-testid="stMetric"] {
+        background-color: #f5f7fa;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 14px 16px;
+    }
+    div[data-testid="stMetricLabel"] { font-weight: 600; }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
  
-# --------------------------------------------------------------------------
-# Header
-# --------------------------------------------------------------------------
+st.title("⚡ Network Job Tracker Dashboard")
  
-st.title("Master Control — Job Costing Dashboard")
-st.caption(
-    f"Source: Master parquet · {date_min.date()} → {date_max.date()} · "
-    f"grouping: {granularity}{' (auto)' if gran_choice == 'Auto' else ''}"
+uploaded = st.file_uploader("Upload your parquet or CSV file", type=["parquet", "csv"])
+if not uploaded:
+    st.info("Upload the parquet/CSV file your export script normally reads, then filters and charts appear below.")
+    st.stop()
+ 
+raw_df, read_err = read_file(uploaded)
+if read_err:
+    st.error(f"Couldn't read that file - it may be corrupted or not a valid CSV/parquet file.\n\n**Details:** {read_err}")
+    st.stop()
+ 
+with st.expander("Detected columns in your file (click to view)"):
+    st.write(list(raw_df.columns))
+ 
+ 
+def guess(*candidates):
+    """Returns the first candidate that exists as a real column, or None if none match."""
+    for c in candidates:
+        if c in raw_df.columns:
+            return c
+    return None
+ 
+ 
+with st.sidebar.expander("⚙️ Column mapping (advanced)", expanded=False):
+    st.caption("Confirm each field maps to the right column in your file.")
+    col_options = list(raw_df.columns)
+    none_option = ["(none)"] + col_options
+ 
+    def pick(label, default_col, key):
+        opts = none_option
+        idx = opts.index(default_col) if default_col in opts else 0
+        if default_col is None:
+            st.warning(f"Couldn't guess a column for **{label}** - pick one.")
+        val = st.selectbox(label, opts, index=idx, key=key)
+        return None if val == "(none)" else val
+ 
+    cols = {
+        "item_col": pick("Description / item", guess("item", "description"), "map_item"),
+        "qsub_col": pick("Quantity (qsub)", guess("qsub", "quantity_used"), "map_qsub"),
+        "district_col": pick("District", guess("shire", "district"), "map_district"),
+        "project_col": pick("Project", guess("project"), "map_project"),
+        "circuit_col": pick("Circuit", guess("segmentcode", "circuit"), "map_circuit"),
+        "pole_col": pick("Pole / enid", guess("pole", "enid"), "map_pole"),
+        "pid_col": pick("PID", guess("pid_ohl_nr", "pid"), "map_pid"),
+        "total_col": pick("Total value", guess("total"), "map_total"),
+        "orig_col": pick("Original value", guess("orig", "original"), "map_orig"),
+        "job_col": pick("Job", guess("job", "sourcefile"), "map_job"),
+        "date_col": pick("Date", guess("datetouse", "date", "plan1", "done"), "map_date"),
+    }
+ 
+missing_required = [k for k in ["item_col", "qsub_col", "district_col", "circuit_col"] if cols[k] is None]
+if missing_required:
+    st.error(f"These required fields still need a column picked in the sidebar 'Column mapping' section: {missing_required}")
+    st.stop()
+ 
+if cols.get("pole_col") is None:
+    st.sidebar.warning("No Pole/enid column selected - CV8 and CV31 counts can't be deduplicated by pole and will be shown as raw row counts, which may not match the export tool.")
+ 
+df = process_data(raw_df, cols)
+ 
+district_col, project_col, circuit_col = cols["district_col"], cols["project_col"], cols["circuit_col"]
+ 
+# ---- Sidebar filters ----
+st.sidebar.header("🔍 Filters")
+ 
+if df["_date"].notna().any():
+    min_d, max_d = df["_date"].min(), df["_date"].max()
+    date_range = st.sidebar.date_input("Date", value=(min_d.date(), max_d.date()))
+else:
+    date_range = None
+    st.sidebar.caption("No usable dates found in the selected Date column.")
+ 
+ 
+def multiselect_filter(label, col, key):
+    if not col or col not in df.columns:
+        return []
+    opts = sorted(df[col].dropna().astype(str).unique())
+    return st.sidebar.multiselect(label, opts, key=key)
+ 
+ 
+districts = multiselect_filter("District", district_col, "f_district")
+projects = multiselect_filter("Project", project_col, "f_project")
+circuits = multiselect_filter("Circuit", circuit_col, "f_circuit")
+ 
+f = df.copy()
+if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
+    start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    f = f[f["_date"].between(start, end)]
+if districts:
+    f = f[f[district_col].astype(str).isin(districts)]
+if projects:
+    f = f[f[project_col].astype(str).isin(projects)]
+if circuits:
+    f = f[f[circuit_col].astype(str).isin(circuits)]
+ 
+st.sidebar.divider()
+st.sidebar.metric("Rows after filters", f"{len(f):,}", delta=f"of {len(df):,} total")
+ 
+tab_overview, tab_jobs, tab_items, tab_forecast, tab_totals = st.tabs(
+    ["📊 Overview", "🗂️ Jobs", "📦 Mapped Items", "📈 Pole Position", "💰 Totals"]
 )
  
-tab_trend, tab_pid, tab_finance = st.tabs(["📈 Trends", "📊 PID Breakdown", "💰 Finance"])
+# ---- Overview: CV7_recover over time ----
+with tab_overview:
+    st.subheader("CV7_recover — count over time")
+    recover_keys = {normalize_item(k) for k in CV7_recover}
+    recover_df = f[f["_item_norm"].isin(recover_keys)]
+    recover_total = recover_df["_qsub_adj"].sum()
+    show_total_banner("Total CV7_recover count", f"{recover_total:,.0f}")
  
-# --------------------------------------------------------------------------
-# TAB 1 — Trends
-# --------------------------------------------------------------------------
- 
-with tab_trend:
-    st.subheader("Panel 01 — Total by Date (Construction + Materials)")
-    st.caption(
-        "Each bar = base (navy) + variance vs. original (red/green) + materials (yellow), stacked"
-    )
- 
-    construction = fdf_dated[fdf_dated["flag"] == "construction"].copy()
-    material = fdf_dated[fdf_dated["flag"] == "material"].copy()
- 
-    if construction.empty and material.empty:
-        st.info("No records under these filters. Widen the date range or clear a filter.")
+    if recover_df.empty or recover_df["_date"].isna().all():
+        st.caption("No CV7_recover records (with a date) for the current filters.")
     else:
-        construction["bucket"] = bucket_series(construction["datetouse"], granularity)
-        material["bucket"] = bucket_series(material["datetouse"], granularity)
- 
-        c_agg = construction.groupby("bucket", as_index=False).agg(total=("total", "sum"), orig=("orig", "sum"))
-        m_agg = material.groupby("bucket", as_index=False).agg(material=("total", "sum"))
- 
-        chart_df = pd.merge(c_agg, m_agg, on="bucket", how="outer").fillna(0)
-        chart_df = chart_df.sort_values("bucket")
-        chart_df["variance"] = chart_df["total"] - chart_df["orig"]
-        # base = the smaller of total/orig ("the rest"); cap = the gap between them, coloured by sign
-        chart_df["base"] = chart_df[["total", "orig"]].min(axis=1)
-        chart_df["cap"] = chart_df["variance"].abs()
-        chart_df["cap_color"] = chart_df["variance"].apply(lambda v: COLOR_GREEN if v >= 0 else COLOR_RED)
-        chart_df["label"] = chart_df["bucket"].apply(lambda ts: bucket_label(ts, granularity))
- 
-        shared_buckets = chart_df["bucket"].tolist()
-        shared_labels = chart_df["label"].tolist()
- 
-        grand_total = chart_df["total"].sum() + chart_df["material"].sum()
-        var_sum = chart_df["variance"].sum()
- 
-        metric_row([
-            ("Total (construction + materials)", fmt_money(grand_total), COLOR_NAVY, True),
-            ("Construction total", fmt_money(chart_df["total"].sum()), None, False),
-            ("Original", fmt_money(chart_df["orig"].sum()), None, False),
-            ("Variance", fmt_money(var_sum), COLOR_GREEN if var_sum >= 0 else COLOR_RED, False),
-            ("Materials", fmt_money(chart_df["material"].sum()), COLOR_YELLOW, False),
-        ])
- 
-        fig = go.Figure()
- 
-        fig.add_trace(go.Bar(
-            x=chart_df["label"], y=chart_df["base"],
-            marker_color=COLOR_NAVY,
-            name="Base (original / the rest)",
-            customdata=chart_df[["total", "orig", "variance", "material"]],
-            hovertemplate="<b>%{x}</b><br>Base: £%{y:,.2f}<extra></extra>",
-        ))
-        fig.add_trace(go.Bar(
-            x=chart_df["label"], y=chart_df["cap"],
-            marker_color=chart_df["cap_color"],
-            name="Variance (total − original)",
-            hovertemplate="<b>%{x}</b><br>Variance: £%{y:,.2f}<extra></extra>",
-            showlegend=False,
-        ))
-        fig.add_trace(go.Bar(
-            x=chart_df["label"], y=chart_df["material"],
-            marker_color=COLOR_YELLOW,
-            marker_line=dict(color="#B98600", width=0.6),
-            name="Materials",
-            hovertemplate="<b>%{x}</b><br>Materials: £%{y:,.2f}<extra></extra>",
-        ))
-        # dummy traces purely to add red/green to the legend (variance trace itself is colour-mixed)
-        fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_GREEN, name="Positive variation"))
-        fig.add_trace(go.Bar(x=[None], y=[None], marker_color=COLOR_RED, name="Negative variation"))
- 
-        fig.update_layout(
-            **PLOTLY_LIGHT,
-            height=400,
-            barmode="stack",
-            yaxis=dict(tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
-            xaxis=dict(
-                gridcolor=GRID_LIGHT, tickfont=dict(size=12),
-                categoryorder="array", categoryarray=shared_labels,
-            ),
-            legend=dict(orientation="h", y=-0.18, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
-            bargap=0.25,
-            margin=dict(l=10, r=10, t=30, b=10),
+        granularity = st.radio("Group by", ["Day", "Week", "Month"], index=2, horizontal=True)
+        freq = {"Day": "D", "Week": "W", "Month": "MS"}[granularity]
+        trend = (
+            recover_df.dropna(subset=["_date"])
+            .set_index("_date")
+            .resample(freq)["_qsub_adj"]
+            .sum()
+            .reset_index()
+            .rename(columns={"_date": "Date", "_qsub_adj": "Count"})
         )
+        fig = px.bar(trend, x="Date", y="Count", text="Count")
+        fig.update_traces(marker_color="#2563eb")
+        fig.update_layout(margin=dict(t=10, b=10))
         st.plotly_chart(fig, use_container_width=True)
  
-    st.markdown("---")
-    st.subheader("Panel 02 — Total by Team Leader (Construction)")
-    st.caption("Stacked by team leader · same filters, date grouping & x-axis as Panel 01")
- 
-    if construction.empty:
-        st.info("No records under these filters.")
-    else:
-        totals_by_lider = (
-            construction.assign(lider=construction["team lider"].fillna("Unassigned"))
-            .groupby("lider")["total"].sum()
-            .sort_values(ascending=False)
-        )
-        TOP_N = 6
-        top_liders = list(totals_by_lider.index[:TOP_N])
-        has_other = len(totals_by_lider) > TOP_N
- 
-        construction["lider_grp"] = construction["team lider"].fillna("Unassigned")
-        if has_other:
-            construction["lider_grp"] = construction["lider_grp"].where(
-                construction["lider_grp"].isin(top_liders), "Other"
-            )
- 
-        lider_order = top_liders + (["Other"] if has_other else [])
-        color_map = {l: (COLOR_MUTED if l == "Other" else CATEGORY_PALETTE[i % len(CATEGORY_PALETTE)])
-                     for i, l in enumerate(lider_order)}
- 
-        def _short_name(name, n=16):
-            return name if len(name) <= n else name[:n - 1] + "…"
- 
-        short_label = {l: (l if l == "Other" else _short_name(l)) for l in lider_order}
- 
-        # pivot onto the SAME bucket list & order used by Panel 01, so both x-axes match exactly
-        lider_pivot = (
-            construction.groupby(["bucket", "lider_grp"])["total"].sum()
-            .unstack("lider_grp", fill_value=0)
-            .reindex(index=shared_buckets, fill_value=0)
-            .reindex(columns=lider_order, fill_value=0)
-        )
- 
-        var_sum = construction["total"].sum() - construction["orig"].sum()
-        metric_row([
-            ("Total (construction)", fmt_money(construction["total"].sum()), COLOR_NAVY, True),
-            ("Original", fmt_money(construction["orig"].sum()), None, False),
-            ("Variance", fmt_money(var_sum), COLOR_GREEN if var_sum >= 0 else COLOR_RED, False),
-        ])
- 
-        fig2 = go.Figure()
-        for l in lider_order:
-            fig2.add_trace(go.Bar(
-                x=shared_labels,
-                y=lider_pivot[l].values,
-                name=short_label[l],
-                marker_color=color_map[l],
-                hovertemplate=f"<b>{l}</b><br>%{{x}}<br>£%{{y:,.2f}}<extra></extra>",
-            ))
-        fig2.update_layout(
-            **PLOTLY_LIGHT,
-            height=380,
-            barmode="stack",
-            yaxis=dict(tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
-            xaxis=dict(
-                gridcolor=GRID_LIGHT, tickfont=dict(size=12),
-                categoryorder="array", categoryarray=shared_labels,
-            ),
-            legend=dict(
-                orientation="h", y=-0.22, x=0.5, xanchor="center",
-                bgcolor="rgba(0,0,0,0)", font=dict(size=11), tracegroupgap=4,
-            ),
-            bargap=0.25,
-            margin=dict(l=10, r=10, t=30, b=10),
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-        if has_other:
-            st.caption(
-                "Top " + str(TOP_N) + " team leaders shown individually — the rest are grouped under **Other**."
-            )
- 
-# --------------------------------------------------------------------------
-# TAB 2 — PID Breakdown
-# --------------------------------------------------------------------------
- 
-with tab_pid:
-    st.subheader("Panel 03 — PID Breakdown")
-    st.caption("District → Project → Project Manager → PID, one bar per PID · ordered by total value, highest first")
- 
-    mc_mode = st.radio("Show", ["All", "Construction", "Material"], horizontal=True)
- 
-    pdf = fdf.dropna(subset=["pid"]).copy()
-    if mc_mode != "All":
-        pdf = pdf[pdf["flag"] == mc_mode.lower()]
- 
-    if pdf.empty:
-        st.info("No PIDs under these filters.")
-    else:
-        pdf["has_plan"] = pdf["plan1"].notna()
-        pdf["has_done"] = pdf["done"].notna()
-        pdf["has_inv"] = pdf["invoice date"].notna()
- 
-        # mutually exclusive progress stage per row, so the four segments sum exactly to "total"
-        pdf["stage"] = np.select(
-            [pdf["has_inv"], pdf["has_done"], pdf["has_plan"]],
-            ["invoiced", "done", "planned"],
-            default="remaining",
-        )
- 
-        def _mode(s):
-            m = s.mode()
-            return m.iloc[0] if not m.empty else None
- 
-        # group by PID alone so every PID gets exactly one row/bar — a PID that touched more
-        # than one district/project/PM in the raw data is attributed to its most common one
-        base = pdf.groupby("pid", dropna=False).agg(
-            total=("total", "sum"),
-            job=("job", _mode),
-            district=("district", _mode),
-            project=("project", _mode),
-            pm=("project manager", _mode),
-        ).reset_index()
- 
-        stage_sums = pdf.groupby(["pid", "stage"], dropna=False)["total"].sum().unstack("stage", fill_value=0)
-        for s in ["remaining", "planned", "done", "invoiced"]:
-            if s not in stage_sums.columns:
-                stage_sums[s] = 0.0
-        stage_sums = stage_sums.reset_index()
- 
-        agg = base.merge(stage_sums, on="pid", how="left").fillna(0)
- 
-        # variance always reflects construction budget (total vs original), independent of the Show toggle
-        var_src = fdf.dropna(subset=["pid"])
-        var_src = var_src[var_src["flag"] == "construction"]
-        var_agg = var_src.groupby("pid", dropna=False).agg(
-            c_total=("total", "sum"), c_orig=("orig", "sum")
-        ).reset_index()
-        var_agg["variance"] = var_agg["c_total"] - var_agg["c_orig"]
-        agg = agg.merge(var_agg[["pid", "variance"]], on="pid", how="left").fillna({"variance": 0.0})
- 
-        assert agg["pid"].is_unique  # one row = one bar, guaranteed
- 
-        # order: district money desc -> project money desc -> project manager money desc -> pid money desc
-        agg["district_total"] = agg.groupby("district")["total"].transform("sum")
-        agg["project_total"] = agg.groupby(["district", "project"])["total"].transform("sum")
-        agg["pm_total"] = agg.groupby(["district", "project", "pm"])["total"].transform("sum")
-        agg = agg.sort_values(
-            ["district_total", "project_total", "pm_total", "total"],
-            ascending=[False, False, False, False],
-        )
- 
-        agg["pm_label"] = agg["pm"].fillna("Unassigned")
-        agg["district_label"] = agg["district"].fillna("Unassigned")
-        agg["project_label"] = agg["project"].fillna("Unassigned")
- 
-        var_sum_all = agg["variance"].sum()
-        metric_row([
-            ("Total", fmt_money(agg["total"].sum()), COLOR_NAVY, True),
-            ("Remaining", fmt_money(agg["remaining"].sum()), COLOR_RED, False),
-            ("Planned", fmt_money(agg["planned"].sum()), COLOR_AMBER, False),
-            ("Done", fmt_money(agg["done"].sum()), COLOR_DARKBLUE, False),
-            ("Invoiced", fmt_money(agg["invoiced"].sum()), COLOR_PURPLE, False),
-            ("Variance", fmt_money(var_sum_all), COLOR_GREEN if var_sum_all >= 0 else COLOR_RED, False),
-        ])
-        st.caption(f"{len(agg)} PID(s) in view — Remaining/Planned/Done/Invoiced sum to Total; Variance is total vs. original budget")
- 
-        # ---- render: plain HTML/CSS grouped bars (District > Project > PM > PID) ----
-        # Plotly's multicategory axis proved unreliable at this row count/depth — this is
-        # deterministic: exactly one proportional bar row per PID, grouped under nested headers.
- 
-        def esc(s):
-            return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
- 
-        STAGE_COLS = [
-            ("remaining", "Remaining", COLOR_RED),
-            ("planned", "Planned", COLOR_AMBER),
-            ("done", "Done", COLOR_DARKBLUE),
-            ("invoiced", "Invoiced", COLOR_PURPLE),
-        ]
- 
-        legend_html = "".join(
-            f"<span style='display:inline-flex;align-items:center;gap:5px;margin-right:16px;"
-            f"font-family:\"IBM Plex Mono\",monospace;font-size:11px;color:{TEXT_MUTED};'>"
-            f"<span style='width:11px;height:11px;border-radius:3px;background:{color};display:inline-block;'></span>"
-            f"{label}</span>"
-            for _, label, color in STAGE_COLS
-        )
-        legend_html += (
-            f"<span style='display:inline-flex;align-items:center;gap:5px;margin-right:16px;"
-            f"font-family:\"IBM Plex Mono\",monospace;font-size:11px;color:{TEXT_MUTED};'>"
-            f"<span style='width:9px;height:9px;border-radius:50%;background:{COLOR_GREEN};display:inline-block;'></span>"
-            f"At/under budget</span>"
-            f"<span style='display:inline-flex;align-items:center;gap:5px;"
-            f"font-family:\"IBM Plex Mono\",monospace;font-size:11px;color:{TEXT_MUTED};'>"
-            f"<span style='width:9px;height:9px;border-radius:50%;background:{COLOR_RED};display:inline-block;'></span>"
-            f"Over budget</span>"
-        )
-        st.markdown(f"<div style='margin:6px 0 14px;'>{legend_html}</div>", unsafe_allow_html=True)
- 
-        rows_html = []
-        last_district, last_project, last_pm = None, None, None
- 
-        for _, r in agg.iterrows():
-            if r["district_label"] != last_district:
-                d_total = agg.loc[agg["district_label"] == r["district_label"], "total"].sum()
-                rows_html.append(
-                    f"<div style='background:{COLOR_NAVY};color:#fff;padding:8px 14px;"
-                    f"font-family:\"IBM Plex Mono\",monospace;font-size:13px;font-weight:700;"
-                    f"letter-spacing:.04em;text-transform:uppercase;margin-top:14px;border-radius:4px;"
-                    f"display:flex;justify-content:space-between;'>"
-                    f"<span>{esc(r['district_label'])}</span><span>{fmt_money(d_total)}</span></div>"
-                )
-                last_district, last_project, last_pm = r["district_label"], None, None
- 
-            if r["project_label"] != last_project:
-                p_total = agg.loc[
-                    (agg["district_label"] == r["district_label"]) & (agg["project_label"] == r["project_label"]),
-                    "total",
-                ].sum()
-                rows_html.append(
-                    f"<div style='background:#EEF1F5;color:{TEXT_DARK};padding:6px 14px 6px 26px;"
-                    f"font-family:\"IBM Plex Mono\",monospace;font-size:11.5px;font-weight:600;"
-                    f"letter-spacing:.03em;text-transform:uppercase;margin-top:6px;border-radius:3px;"
-                    f"display:flex;justify-content:space-between;'>"
-                    f"<span>{esc(r['project_label'])}</span><span>{fmt_money(p_total)}</span></div>"
-                )
-                last_project, last_pm = r["project_label"], None
- 
-            if r["pm_label"] != last_pm:
-                rows_html.append(
-                    f"<div style='padding:4px 14px 2px 40px;font-family:\"IBM Plex Sans\",sans-serif;"
-                    f"font-size:10.5px;font-style:italic;color:{TEXT_MUTED};margin-top:4px;'>"
-                    f"{esc(r['pm_label'])}</div>"
-                )
-                last_pm = r["pm_label"]
- 
-            total = r["total"]
-            pct = {k: (r[k] / total * 100 if total > 0 else 0) for k, _, _ in STAGE_COLS}
-            invoiced_pct = (r["invoiced"] / total * 100) if total > 0 else 0.0
-            var_color = COLOR_GREEN if r["variance"] >= 0 else COLOR_RED
-            var_sign = "+" if r["variance"] >= 0 else ""
- 
-            segs = "".join(
-                f"<div style='width:{pct[k]:.3f}%;background:{color};height:100%;' title='{label}: {fmt_money(r[k])}'></div>"
-                for k, label, color in STAGE_COLS if pct[k] > 0
-            )
- 
-            rows_html.append(f"""
-            <div style='display:flex;align-items:center;gap:10px;padding:3px 14px 3px 52px;
-                        border-top:1px solid #F0F2F5;'>
-              <div style='width:150px;flex:none;font-family:"IBM Plex Mono",monospace;font-size:11.5px;
-                          color:{TEXT_DARK};font-weight:600;overflow:hidden;text-overflow:ellipsis;
-                          white-space:nowrap;' title="{esc(r['job'])}">{esc(r['pid'])}</div>
-              <div style='flex:1;height:15px;border-radius:3px;overflow:hidden;display:flex;background:#F0F2F5;'>
-                {segs}
-              </div>
-              <div style='width:8px;height:8px;border-radius:50%;background:{var_color};flex:none;'
-                   title='Variance: {var_sign}{fmt_money(r["variance"])}'></div>
-              <div style='width:230px;flex:none;font-family:"IBM Plex Mono",monospace;font-size:11px;
-                          color:{TEXT_DARK};text-align:right;'>
-                <b>{fmt_money_short(total)}</b>&nbsp;·&nbsp;
-                <span style='color:{COLOR_PURPLE};'>Inv {fmt_money_short(r["invoiced"])} ({invoiced_pct:.0f}%)</span>
-              </div>
-            </div>
-            """)
- 
-        chart_html = "".join(rows_html)
-        st.markdown(
-            f"""
-            <div style='max-height:900px;overflow-y:auto;border:1px solid {GRID_LIGHT};
-                        border-radius:6px;padding:8px 0;background:#FFFFFF;'>
-              {chart_html}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Each bar's segments are proportional to that PID's own total (Remaining/Planned/Done/Invoiced) — "
-            "so proportions compare cleanly across very different PID sizes. Dot colour = budget variance. "
-            "Scroll for the full list."
-        )
- 
-# --------------------------------------------------------------------------
-# TAB 3 — Finance
-# --------------------------------------------------------------------------
- 
-with tab_finance:
-    st.subheader("Panel 04 — Financial Health")
-    st.caption("Budget performance, billing pipeline & invoicing speed · same filters as above")
- 
-    fin = fdf_dated.copy()
-    fin_c = fin[fin["flag"] == "construction"].copy()
-    fin_m = fin[fin["flag"] == "material"].copy()
- 
-    if fin.empty:
-        st.info("No records under these filters. Widen the date range or clear a filter.")
-    else:
-        fin["has_plan"] = fin["plan1"].notna()
-        fin["has_done"] = fin["done"].notna()
-        fin["has_inv"] = fin["invoice date"].notna()
- 
-        total_value = fin["total"].sum()
-        orig_value = fin_c["orig"].sum()
-        variance = fin_c["total"].sum() - orig_value
-        variance_pct = (variance / orig_value * 100) if orig_value else 0.0
- 
-        invoiced_sum = fin.loc[fin["has_inv"], "total"].sum()
-        wip_sum = fin.loc[fin["has_done"] & ~fin["has_inv"], "total"].sum()          # earned, not yet billed
-        backlog_sum = fin.loc[~fin["has_done"], "total"].sum()                        # not yet completed
-        invoiced_pct = (invoiced_sum / total_value * 100) if total_value else 0.0
-        material_pct = (fin_m["total"].sum() / total_value * 100) if total_value else 0.0
- 
-        # ---- KPI row 1 : budget performance ----
-        metric_row([
-            ("Total Value", fmt_money(total_value), COLOR_NAVY, True),
-            ("Original Budget", fmt_money(orig_value), None, False),
-            ("Variance", fmt_money(variance), COLOR_GREEN if variance >= 0 else COLOR_RED, False),
-            ("Variance %", f"{variance_pct:+.2f}%", COLOR_GREEN if variance_pct >= 0 else COLOR_RED, False),
-        ])
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        # ---- KPI row 2 : cash / pipeline ----
-        metric_row([
-            ("Invoiced", fmt_money(invoiced_sum) + f"  ({invoiced_pct:.1f}%)", COLOR_PURPLE, False),
-            ("WIP — done, not invoiced", fmt_money(wip_sum), COLOR_GREEN, False),
-            ("Backlog — not yet done", fmt_money(backlog_sum), COLOR_MUTED, False),
-            ("Material share", f"{material_pct:.1f}%", COLOR_YELLOW, False),
-        ])
- 
-        st.markdown("---")
- 
-        col_a, col_b = st.columns(2)
- 
-        # ---- Billing pipeline (single stacked bar) ----
-        with col_a:
-            st.markdown("**Billing pipeline**")
-            st.caption("Where the total value currently sits, end to end")
- 
-            stage_vals = pd.Series({
-                "Remaining\n(not started)": fin.loc[~fin["has_plan"], "total"].sum(),
-                "Planned\n(not done)": fin.loc[fin["has_plan"] & ~fin["has_done"], "total"].sum(),
-                "Done\n(not invoiced)": wip_sum,
-                "Invoiced": invoiced_sum,
+    st.subheader("All pole categories (erect only)")
+    # Grouped by SOURCE category (CV7_erect / CV7_erect_H / CV7_erect_lv),
+    # not by the shared "_mapped_category" label - several of these
+    # categories map to the same label ("CV7 HV pole"), so grouping by
+    # label would silently merge their counts. This mirrors how the
+    # export tool's Summary sheet keeps each category as its own column.
+    # CV7_recover is excluded here since it already has its own chart above.
+    pole_rows = []
+    for cat_name, mapping in POLE_CATEGORIES.items():
+        if cat_name == "CV7_recover":
+            continue
+        keys = {normalize_item(k) for k in mapping}
+        sub = f[f["_item_norm"].isin(keys)]
+        if not sub.empty:
+            pole_rows.append({
+                "Pole type": POLE_DISPLAY_NAMES.get(cat_name, cat_name),
+                "Count": sub["_qsub_adj"].sum(),
             })
-            pipe_colors = [COLOR_MUTED, COLOR_AMBER, COLOR_GREEN, COLOR_PURPLE]
+    pole_summary = pd.DataFrame(pole_rows)
  
-            fig4 = go.Figure()
-            for stage, val, color in zip(stage_vals.index, stage_vals.values, pipe_colors):
-                fig4.add_trace(go.Bar(
-                    y=["Value"], x=[val], name=stage.replace("\n", " "), orientation="h",
-                    marker_color=color,
-                    text=[fmt_money_short(val)], textposition="inside", textfont=dict(color="#fff", size=12),
-                    hovertemplate=f"<b>{stage.replace(chr(10),' ')}</b>: £%{{x:,.2f}}<extra></extra>",
-                ))
-            fig4.update_layout(
-                **PLOTLY_LIGHT,
-                height=180,
-                barmode="stack",
-                xaxis=dict(tickprefix="£", gridcolor=GRID_LIGHT, zeroline=False, tickfont=dict(size=12)),
-                yaxis=dict(visible=False),
-                legend=dict(orientation="h", y=-0.35, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
-                margin=dict(l=10, r=10, t=10, b=10),
+    pole_total = pole_summary["Count"].sum() if not pole_summary.empty else 0
+    show_total_banner("Total poles (all categories)", f"{pole_total:,.0f}")
+ 
+    if not pole_summary.empty:
+        fig2 = px.bar(pole_summary, x="Pole type", y="Count", text="Count", color="Pole type")
+        fig2.update_layout(showlegend=False, margin=dict(t=10, b=10))
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.caption("No pole records for the current filters.")
+ 
+# ---- Jobs tab ----
+with tab_jobs:
+    # ---- Outages Programme (uploaded workbook, cached on file content) ----
+    st.subheader("Outages Programme 2026")
+ 
+    outage_upload = st.file_uploader(
+        "Upload High-level_planning_2026.xlsx",
+        type=["xlsx"],
+        key="outage_file_uploader",
+    )
+ 
+    if outage_upload is None:
+        st.info("Upload the outages programme workbook (sheet '2026', header on row 7) to see it here.")
+        outage_df = None
+    else:
+        outage_df, outage_err = load_outage_programme(outage_upload.getvalue())
+        if outage_err:
+            st.error(
+                f"Couldn't read that workbook - check it has a sheet named '2026' with headers on row 7.\n\n"
+                f"**Details:** {outage_err}"
             )
-            st.plotly_chart(fig4, use_container_width=True)
+            outage_df = None
  
-        # ---- Invoicing lag ----
-        with col_b:
-            st.markdown("**Invoicing speed**")
-            st.caption("Days between job marked *done* and *invoiced*")
+    if outage_df is not None:
+        st.caption(f"{len(outage_df):,} rows from High-level_planning_2026.xlsx (sheet '2026')")
  
-            lag_df = fin[fin["has_done"] & fin["has_inv"]].copy()
-            lag_df["lag_days"] = (lag_df["invoice date"] - lag_df["done"]).dt.days
-            lag_df = lag_df[(lag_df["lag_days"] >= 0) & (lag_df["lag_days"] <= 365)]
- 
-            if lag_df.empty:
-                st.info("Not enough done + invoiced pairs under these filters to measure lag.")
+        oc1, oc2, oc3 = st.columns(3)
+        with oc1:
+            outage_districts = st.multiselect(
+                "District", sorted(outage_df["District"].dropna().unique()), key="outage_district"
+            )
+        with oc2:
+            outage_pms = st.multiselect(
+                "SPEN PM", sorted(outage_df["SPEN PM"].dropna().unique()), key="outage_pm"
+            )
+        with oc3:
+            if outage_df["Outage Date"].notna().any():
+                min_od, max_od = outage_df["Outage Date"].min(), outage_df["Outage Date"].max()
+                outage_date_range = st.date_input(
+                    "Outage date", value=(min_od.date(), max_od.date()), key="outage_date_range"
+                )
             else:
-                med_lag = lag_df["lag_days"].median()
-                mean_lag = lag_df["lag_days"].mean()
-                st.markdown(
-                    f"<span style='font-family:\"IBM Plex Mono\",monospace;font-size:13px;color:{TEXT_DARK};'>"
-                    f"Median: <b>{med_lag:.0f} days</b> &nbsp;·&nbsp; Average: <b>{mean_lag:.0f} days</b> "
-                    f"&nbsp;·&nbsp; n={len(lag_df):,}</span>",
-                    unsafe_allow_html=True,
-                )
-                fig5 = go.Figure()
-                fig5.add_trace(go.Histogram(
-                    x=lag_df["lag_days"], nbinsx=30, marker_color=COLOR_TEAL,
-                    hovertemplate="%{x} days<br>%{y} jobs<extra></extra>",
-                ))
-                fig5.add_vline(x=med_lag, line_dash="dash", line_color=COLOR_RED,
-                                annotation_text="median", annotation_font_size=11)
-                fig5.update_layout(
-                    **PLOTLY_LIGHT,
-                    height=180,
-                    xaxis=dict(title="Days", gridcolor=GRID_LIGHT, tickfont=dict(size=11)),
-                    yaxis=dict(title="Jobs", gridcolor=GRID_LIGHT, tickfont=dict(size=11)),
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    bargap=0.1,
-                )
-                st.plotly_chart(fig5, use_container_width=True)
+                outage_date_range = None
  
-        st.markdown("---")
-        st.markdown("**Variance by project**")
-        st.caption("Construction total vs. original budget, worst to best")
+        outage_f = outage_df.copy()
+        if outage_districts:
+            outage_f = outage_f[outage_f["District"].isin(outage_districts)]
+        if outage_pms:
+            outage_f = outage_f[outage_f["SPEN PM"].isin(outage_pms)]
+        if outage_date_range and isinstance(outage_date_range, tuple) and len(outage_date_range) == 2:
+            o_start = pd.Timestamp(outage_date_range[0])
+            o_end = pd.Timestamp(outage_date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            outage_f = outage_f[outage_f["Outage Date"].between(o_start, o_end)]
  
-        proj_var = fin_c.groupby("project", dropna=False).agg(total=("total", "sum"), orig=("orig", "sum"))
-        proj_var = proj_var[proj_var["orig"] != 0]
-        proj_var["variance"] = proj_var["total"] - proj_var["orig"]
-        proj_var["variance_pct"] = proj_var["variance"] / proj_var["orig"] * 100
-        proj_var = proj_var.sort_values("variance_pct")
+        st.caption(f"{len(outage_f):,} rows after outage filters")
  
-        if proj_var.empty:
-            st.info("No projects with a non-zero original budget under these filters.")
+        outage_view = st.radio("View", ["Table", "Calendar"], index=1, horizontal=True, key="outage_view")
+ 
+        if outage_view == "Table":
+            st.dataframe(outage_f, height=420, use_container_width=True, hide_index=True)
         else:
-            fig6 = go.Figure()
-            fig6.add_trace(go.Bar(
-                y=proj_var.index.fillna("Unassigned"), x=proj_var["variance_pct"], orientation="h",
-                marker_color=[COLOR_GREEN if v >= 0 else COLOR_RED for v in proj_var["variance_pct"]],
-                text=[f"{v:+.1f}%" for v in proj_var["variance_pct"]],
-                textposition="outside", textfont=dict(size=12),
-                customdata=proj_var[["total", "orig", "variance"]],
-                hovertemplate=(
-                    "<b>%{y}</b><br>Total: £%{customdata[0]:,.2f}<br>Original: £%{customdata[1]:,.2f}"
-                    "<br>Variance: £%{customdata[2]:,.2f} (%{x:+.1f}%)<extra></extra>"
-                ),
-            ))
-            fig6.update_layout(
-                **PLOTLY_LIGHT,
-                height=max(220, 42 * len(proj_var) + 60),
-                xaxis=dict(title="Variance %", gridcolor=GRID_LIGHT, zeroline=True, zerolinecolor="#B9C2CC", tickfont=dict(size=12)),
-                yaxis=dict(gridcolor=GRID_LIGHT, tickfont=dict(size=13), automargin=True),
-                margin=dict(l=10, r=40, t=10, b=10),
+            palette = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#be185d", "#4d7c0f"]
+            districts_sorted = sorted(outage_f["District"].dropna().unique())
+            DISTRICT_COLORS = {d: palette[i % len(palette)] for i, d in enumerate(districts_sorted)}
+ 
+            cal_df = outage_f.dropna(subset=["Outage Date"])
+            # Vectorized event build (no .iterrows(), which is slow row-by-row) -
+            # zip over plain Python lists is the fastest way to do this in pandas.
+            starts = cal_df["Outage Date"].dt.strftime("%Y-%m-%d").tolist()
+            districts = cal_df["District"].tolist()
+            schemes = cal_df["Scheme"].tolist()
+            outage_nums = cal_df["Outage #"].tolist()
+            circuits_evt = cal_df["Circuit"].tolist()
+            pids_evt = cal_df["PID"].tolist()
+            pms_evt = cal_df["SPEN PM"].tolist()
+            pois_evt = cal_df["POI"].tolist()
+ 
+            def _evt_str(v):
+                return "" if pd.isna(v) or str(v).strip() == "" else str(v).strip()
+ 
+            events = []
+            for start, district, scheme, onum, circuit, pid, pm, poi in zip(
+                starts, districts, schemes, outage_nums, circuits_evt, pids_evt, pms_evt, pois_evt
+            ):
+                d_str, s_str = _evt_str(district), _evt_str(scheme)
+                # Full title (District — Scheme — PID — Circuit — Outage # — PM — POI): this is
+                # what FullCalendar puts on the event element's native "title" attribute, so
+                # hovering shows the complete text even though the day cell itself clips it to
+                # one line (see custom_css below) instead of wrapping and breaking the grid.
+                parts = [d_str, s_str]
+                for label, val in [("PID", pid), ("Circuit", circuit), ("Outage #", onum), ("PM", pm), ("POI", poi)]:
+                    v = _evt_str(val)
+                    if v:
+                        parts.append(f"{label} {v}")
+                full_title = " — ".join(p for p in parts if p) or "Outage"
+                color = DISTRICT_COLORS.get(district, "#2563eb")
+                events.append({
+                    "title": full_title,
+                    "start": start,
+                    "allDay": True,
+                    "backgroundColor": color,
+                    "borderColor": color,
+                })
+ 
+            calendar_options = {
+                "initialView": "dayGridMonth",
+                "headerToolbar": {
+                    "left": "prev,next today",
+                    "center": "title",
+                    "right": "dayGridMonth,listMonth",
+                },
+                "height": 650,
+                "firstDay": 1,
+                # Caps how many events render per day cell (extras collapse into
+                # a "+N more" popover) - keeps rendering fast on busy days.
+                "dayMaxEvents": True,
+            }
+ 
+            # Keeps each event on a single line (ellipsis instead of wrapping onto a
+            # second/third line and breaking the day cell's height/layout). The full
+            # text is still there in the "title" attribute above, so hovering an
+            # event reveals it regardless of how it's visually clipped here.
+            calendar_custom_css = """
+                .fc-event-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .fc-daygrid-event { white-space: nowrap; cursor: pointer; }
+                .fc-daygrid-day-number { cursor: pointer; }
+            """
+ 
+            # dateClick/eventClick re-enabled (each click now costs a Streamlit
+            # rerun) so a click can drive the breakdown table + Work Instructions
+            # download below - the earlier callbacks=[] traded that interactivity
+            # away for speed, which no longer fits what's needed here.
+            calendar_result = st_calendar(
+                events=events,
+                options=calendar_options,
+                custom_css=calendar_custom_css,
+                callbacks=["dateClick", "eventClick"],
+                key="outage_calendar",
             )
-            st.plotly_chart(fig6, use_container_width=True)
  
-        st.markdown("---")
-        st.markdown("**PID variance leaderboard**")
-        st.caption("Largest overruns and largest underspends, by £ variance (construction only)")
+            clicked_date = None
+            if calendar_result.get("eventClick"):
+                ev_start = calendar_result["eventClick"].get("event", {}).get("start")
+                if ev_start:
+                    clicked_date = pd.to_datetime(ev_start).date()
+            elif calendar_result.get("dateClick"):
+                dc = calendar_result["dateClick"]
+                dc_date = dc.get("date") or dc.get("dateStr")
+                if dc_date:
+                    clicked_date = pd.to_datetime(dc_date).date()
  
-        pid_var = fin_c.dropna(subset=["pid"]).groupby(
-            ["pid", "district", "project"], dropna=False
-        ).agg(total=("total", "sum"), orig=("orig", "sum")).reset_index()
-        pid_var = pid_var[pid_var["orig"] != 0]
-        pid_var["variance"] = pid_var["total"] - pid_var["orig"]
-        pid_var["variance_pct"] = pid_var["variance"] / pid_var["orig"] * 100
+            if clicked_date is not None:
+                st.session_state["selected_outage_date"] = clicked_date
  
-        if pid_var.empty:
-            st.info("No PIDs with a non-zero original budget under these filters.")
+            selected_date = st.session_state.get("selected_outage_date")
+ 
+            st.divider()
+            if selected_date is None:
+                st.caption("Click a date or an outage above to see its full breakdown here.")
+            else:
+                day_rows = outage_f[outage_f["Outage Date"].dt.date == selected_date]
+                st.markdown(f"**Outages on {selected_date:%d %b %Y}** ({len(day_rows):,})")
+                if day_rows.empty:
+                    st.caption("No outages on this date under the current filters.")
+                else:
+                    st.dataframe(day_rows, use_container_width=True, hide_index=True)
+                    st.download_button(
+                        "📄 Generate Work Instructions (.docx)",
+                        data=generate_outage_docx(day_rows, selected_date),
+                        file_name=f"Work_Instructions_{selected_date:%Y-%m-%d}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+ 
+# ---- Mapped items tab: image-led groups, then the rest as a card grid ----
+with tab_items:
+    st.subheader("Mapped items")
+ 
+    cv7_poles = cv7_dedupe_poles(f)
+    all_card_data = []  # accumulated in display order, feeds the detail selectbox below
+ 
+    grouped_cat_names = {c for group in CARD_GROUPS for c in group.get("categories", [])}
+    grouped_cat_names |= {c for group in CARD_GROUPS if "subtypes" in group for c in ["Switch"]}
+ 
+    for group in CARD_GROUPS:
+        title = group["title"]
+        img_l, img_c, img_r = st.columns([1, 1, 1])
+        with img_c:
+            st.markdown(f"<h3 style='text-align:center; margin-bottom:0.3rem;'>{title}</h3>", unsafe_allow_html=True)
+            image_path = group.get("image")
+            if image_path and os.path.exists(image_path):
+                st.image(image_path, width=300)
+            elif image_path:
+                st.caption(f"⚠️ Image not found: {image_path}")
+ 
+        group_cards = []
+ 
+        if "subtypes" in group:
+            for subtype_name, descriptions in group["subtypes"].items():
+                card = build_subtype_card(f, subtype_name, descriptions)
+                if card:
+                    group_cards.append(card)
+                    all_card_data.append(card)
         else:
-            lead_a, lead_b = st.columns(2)
-            with lead_a:
-                st.markdown(f"<span style='color:{COLOR_RED};font-weight:700;'>Top overruns</span>", unsafe_allow_html=True)
-                worst = pid_var.sort_values("variance").head(8).copy()
-                worst["Variance"] = worst["variance"].apply(fmt_money)
-                worst["Variance %"] = worst["variance_pct"].apply(lambda v: f"{v:+.1f}%")
-                st.dataframe(
-                    worst[["pid", "district", "project", "Variance", "Variance %"]]
-                    .rename(columns={"pid": "PID", "district": "District", "project": "Project"}),
-                    hide_index=True, use_container_width=True,
-                )
-            with lead_b:
-                st.markdown(f"<span style='color:{COLOR_GREEN};font-weight:700;'>Top underspends</span>", unsafe_allow_html=True)
-                best = pid_var.sort_values("variance", ascending=False).head(8).copy()
-                best["Variance"] = best["variance"].apply(fmt_money)
-                best["Variance %"] = best["variance_pct"].apply(lambda v: f"{v:+.1f}%")
-                st.dataframe(
-                    best[["pid", "district", "project", "Variance", "Variance %"]]
-                    .rename(columns={"pid": "PID", "district": "District", "project": "Project"}),
-                    hide_index=True, use_container_width=True,
-                )
+            for cat_name in group.get("categories", []):
+                mapping = ALL_CATEGORIES.get(cat_name)
+                if mapping is None:
+                    continue
+                card = build_card(f, cat_name, mapping, cv7_poles)
+                if card:
+                    group_cards.append(card)
+                    all_card_data.append(card)
  
-st.markdown("---")
-st.caption(f"Master Control Dashboard — data as of {date_max.date()}")
+        if group_cards:
+            row_cols = st.columns(len(group_cards))
+            for slot, (cat_name, total_qty, _sub) in zip(row_cols, group_cards):
+                render_metric(slot, cat_name, total_qty, display_name=POLE_DISPLAY_NAMES.get(cat_name))
+        else:
+            st.caption("No records for this group under the current filters.")
  
+        st.divider()
+ 
+    # Everything not already shown in an image group, same grid as before
+    remaining_cat_names = [c for c in ALL_CATEGORIES if c not in grouped_cat_names]
+    remaining_cards = []
+    for cat_name in remaining_cat_names:
+        card = build_card(f, cat_name, ALL_CATEGORIES[cat_name], cv7_poles)
+        if card:
+            remaining_cards.append(card)
+            all_card_data.append(card)
+ 
+    if remaining_cards:
+        st.markdown("**Other items**")
+        n_cols = 4
+        rows = [remaining_cards[i:i + n_cols] for i in range(0, len(remaining_cards), n_cols)]
+        for row in rows:
+            row_cols = st.columns(n_cols)
+            for slot, (cat_name, total_qty, _sub) in zip(row_cols, row):
+                render_metric(slot, cat_name, total_qty)
+ 
+    if not all_card_data:
+        st.caption("No mapped items for the current filters.")
+    else:
+        st.divider()
+        chosen = st.selectbox("View details for", [c[0] for c in all_card_data])
+        _, _, sub = next(c for c in all_card_data if c[0] == chosen)
+        detail = pd.DataFrame({
+            "District": sub[district_col],
+            "Job": sub["_job_clean"],
+            "Circuit": sub[circuit_col],
+            "enid": sub[cols["pole_col"]] if cols["pole_col"] in sub.columns else "",
+        })
+        st.dataframe(detail, height=320, use_container_width=True, hide_index=True)
+ 
+# ---- Poles Forecast tab ----
+@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
+def list_forecast_sheets(file_bytes: bytes):
+    """Returns (sheet_names, error_message)."""
+    try:
+        return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names, None
+    except Exception as e:
+        return [], str(e)
+ 
+ 
+@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
+def load_forecast_workbook(file_bytes: bytes, sheet_name: str):
+    """Returns (df, error_message)."""
+    try:
+        fdf = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+        fdf.columns = fdf.columns.astype(str).str.strip()
+        return fdf, None
+    except Exception as e:
+        return None, str(e)
+ 
+ 
+with tab_forecast:
+    st.subheader("Pole Position")
+ 
+    forecast_upload = st.file_uploader(
+        "Upload poles forecast workbook (.xlsx)",
+        type=["xlsx"],
+        key="forecast_file_uploader",
+    )
+ 
+    if forecast_upload is None:
+        st.info(
+            "Upload the workbook with columns: District, Project ID, Project, "
+            "Circuit, Voltage, Forecasted Total poles, Poles Disposed."
+        )
+    else:
+        f_bytes = forecast_upload.getvalue()
+        sheet_names, sheet_err = list_forecast_sheets(f_bytes)
+        if sheet_err:
+            st.error(f"Couldn't open that workbook.\n\n**Details:** {sheet_err}")
+            sheet_names = []
+ 
+        if not sheet_names:
+            pass  # error already shown above - nothing more to render in this tab
+        else:
+            sheet_choice = (
+                st.selectbox("Sheet", sheet_names, key="forecast_sheet")
+                if len(sheet_names) > 1 else sheet_names[0]
+            )
+            fdf, fdf_err = load_forecast_workbook(f_bytes, sheet_choice)
+            if fdf_err:
+                st.error(f"Couldn't read sheet '{sheet_choice}'.\n\n**Details:** {fdf_err}")
+                fdf = None
+ 
+            if fdf is None:
+                pass  # error already shown above
+            else:
+                with st.expander("Detected columns (click to view)"):
+                    st.write(list(fdf.columns))
+ 
+                def fguess(*candidates):
+                    lower_map = {c.lower(): c for c in fdf.columns}
+                    for cand in candidates:
+                        if cand.lower() in lower_map:
+                            return lower_map[cand.lower()]
+                    return None
+ 
+                fcol_options = ["(none)"] + list(fdf.columns)
+ 
+                with st.expander("⚙️ Column mapping", expanded=False):
+                    def fpick(label, default_col, key):
+                        idx = fcol_options.index(default_col) if default_col in fcol_options else 0
+                        if default_col is None:
+                            st.warning(f"Couldn't guess a column for **{label}** - pick one.")
+                        val = st.selectbox(label, fcol_options, index=idx, key=key)
+                        return None if val == "(none)" else val
+ 
+                    f_cols = {
+                        "district": fpick("District", fguess("District"), "fc_district"),
+                        "pid": fpick("Project ID", fguess("Project ID", "PID"), "fc_pid"),
+                        "project": fpick("Project", fguess("Project", "Project Name"), "fc_project"),
+                        "circuit": fpick("Circuit", fguess("Circuit"), "fc_circuit"),
+                        "voltage": fpick("Voltage", fguess("Voltage"), "fc_voltage"),
+                        "forecast": fpick(
+                            "Forecasted Total poles",
+                            fguess("Forecasted Total poles", "Forecasted Total Poles", "Forecast Total Poles"),
+                            "fc_forecast",
+                        ),
+                        "disposed": fpick("Poles Disposed", fguess("Poles Disposed", "Poles disposed"), "fc_disposed"),
+                        "start_date": fpick("Start Date", fguess("Start Date", "StartDate", "Start"), "fc_start_date"),
+                    }
+ 
+                required = ["project", "circuit", "pid", "forecast", "disposed"]
+                missing = [k for k in required if f_cols[k] is None]
+                if missing:
+                    st.error(f"Please map these columns in 'Column mapping' above: {missing}")
+                else:
+                    plot_df = pd.DataFrame({
+                        "District": fdf[f_cols["district"]] if f_cols["district"] else "",
+                        "PID": fdf[f_cols["pid"]],
+                        "Project": fdf[f_cols["project"]],
+                        "Circuit": fdf[f_cols["circuit"]],
+                        "Voltage": fdf[f_cols["voltage"]] if f_cols["voltage"] else "",
+                        "Forecast": pd.to_numeric(fdf[f_cols["forecast"]], errors="coerce").fillna(0),
+                        "Disposed": pd.to_numeric(fdf[f_cols["disposed"]], errors="coerce").fillna(0),
+                    })
+                    if f_cols["start_date"]:
+                        plot_df["Start Date"] = pd.to_datetime(fdf[f_cols["start_date"]], errors="coerce")
+                        plot_df["Year"] = plot_df["Start Date"].dt.year
+                    plot_df = plot_df.dropna(subset=["Project"])
+                    # clamp so a data-entry error (disposed > forecasted) never draws past the bar
+                    plot_df["Disposed"] = plot_df[["Disposed", "Forecast"]].min(axis=1)
+                    plot_df["Remaining"] = (plot_df["Forecast"] - plot_df["Disposed"]).clip(lower=0)
+                    plot_df["Label"] = (
+                        plot_df["Project"].astype(str) + " — "
+                        + plot_df["Circuit"].astype(str) + " — PID "
+                        + plot_df["PID"].astype(str)
+                    )
+ 
+                    fc1, fc2, fc3 = st.columns(3)
+                    with fc1:
+                        forecast_districts = (
+                            st.multiselect("District", sorted(plot_df["District"].dropna().unique()), key="forecast_district")
+                            if f_cols["district"] else []
+                        )
+                    with fc2:
+                        forecast_voltages = (
+                            st.multiselect("Voltage", sorted(plot_df["Voltage"].dropna().unique()), key="forecast_voltage")
+                            if f_cols["voltage"] else []
+                        )
+                    with fc3:
+                        forecast_years = (
+                            st.multiselect(
+                                "Start year",
+                                sorted(plot_df["Year"].dropna().unique().astype(int)),
+                                key="forecast_year",
+                            )
+                            if "Year" in plot_df.columns else []
+                        )
+ 
+                    if forecast_districts:
+                        plot_df = plot_df[plot_df["District"].isin(forecast_districts)]
+                    if forecast_voltages:
+                        plot_df = plot_df[plot_df["Voltage"].isin(forecast_voltages)]
+                    if forecast_years:
+                        plot_df = plot_df[plot_df["Year"].isin(forecast_years)]
+ 
+                    total_forecast = plot_df["Forecast"].sum()
+                    total_disposed = plot_df["Disposed"].sum()
+                    show_total_banner(
+                        "Poles disposed vs forecasted",
+                        f"{total_disposed:,.0f} / {total_forecast:,.0f}"
+                        + (f"  ({total_disposed / total_forecast:.0%})" if total_forecast else ""),
+                    )
+ 
+                    if plot_df.empty:
+                        st.caption("No rows to chart for the current filters.")
+                    else:
+                        plot_df = plot_df.sort_values("Forecast", ascending=True)
+ 
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(
+                            y=plot_df["Label"], x=plot_df["Disposed"], orientation="h",
+                            name="Disposed", marker_color="#16a34a",
+                            hovertemplate="%{y}<br>Disposed: %{x:,.0f}<extra></extra>",
+                        ))
+                        fig.add_trace(go.Bar(
+                            y=plot_df["Label"], x=plot_df["Remaining"], orientation="h",
+                            name="Remaining", marker_color="#dc2626",
+                            hovertemplate="%{y}<br>Remaining: %{x:,.0f}<extra></extra>",
+                        ))
+                        # Total (= Forecast = Disposed + Remaining) printed just past the end
+                        # of each stacked bar, so the project total is readable at a glance
+                        # without having to add the two segments up by eye.
+                        fig.add_trace(go.Scatter(
+                            y=plot_df["Label"], x=plot_df["Forecast"],
+                            mode="text",
+                            text=[f"{v:,.0f}" for v in plot_df["Forecast"]],
+                            textposition="middle right",
+                            textfont=dict(size=12, color="#1e293b"),
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ))
+                        max_forecast = plot_df["Forecast"].max()
+                        fig.update_layout(
+                            barmode="stack",
+                            height=max(420, 34 * len(plot_df)),
+                            margin=dict(l=10, r=60, t=10, b=10),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            xaxis=dict(title="Poles", range=[0, max_forecast * 1.15 if max_forecast else 1]),
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.caption(f"{len(plot_df):,} project/circuit rows shown")
+ 
+ 
+with tab_totals:
+    GBP_COLUMN_CONFIG = lambda col_name: {col_name: st.column_config.NumberColumn(col_name, format="£%.2f")}
+ 
+    total_val = pd.to_numeric(f[cols["total_col"]], errors="coerce").sum() if cols["total_col"] in f.columns else None
+    orig_val = pd.to_numeric(f[cols["orig_col"]], errors="coerce").sum() if cols["orig_col"] in f.columns else None
+ 
+    if total_val is not None:
+        show_total_banner("Total value (£)", f"£{total_val:,.2f}")
+ 
+    c1, c2 = st.columns(2)
+    if total_val is not None:
+        c1.metric("Total value", f"£{total_val:,.2f}")
+    if total_val is not None and orig_val is not None:
+        c2.metric("Difference vs original", f"£{total_val - orig_val:,.2f}")
+ 
+    if total_val is not None and project_col in f.columns:
+        st.divider()
+        st.subheader("Total value by Project")
+        f["_total_val_row"] = pd.to_numeric(f[cols["total_col"]], errors="coerce")
+        by_project_total = (
+            f.groupby(project_col)["_total_val_row"].sum()
+            .reset_index()
+            .rename(columns={project_col: "Project", "_total_val_row": "Total value (£)"})
+            .sort_values("Total value (£)", ascending=False)
+        )
+        st.caption(f"{len(by_project_total):,} projects under the current filters")
+ 
+        fig_proj = px.bar(
+            by_project_total.sort_values("Total value (£)", ascending=True),
+            x="Total value (£)", y="Project", orientation="h", text="Total value (£)",
+        )
+        fig_proj.update_traces(marker_color="#2563eb", texttemplate="£%{text:,.0f}")
+        fig_proj.update_layout(height=max(360, 32 * len(by_project_total)), margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_proj, use_container_width=True)
+ 
+        st.dataframe(
+            by_project_total, height=320, use_container_width=True, hide_index=True,
+            column_config=GBP_COLUMN_CONFIG("Total value (£)"),
+        )
+ 
+    if total_val is not None and orig_val is not None:
+        f["_row_variance"] = pd.to_numeric(f[cols["total_col"]], errors="coerce") - pd.to_numeric(f[cols["orig_col"]], errors="coerce")
+        variance_rows = f[f["_row_variance"] != 0]
+ 
+        st.subheader("Jobs where total ≠ original")
+        variance_table = pd.DataFrame({
+            "District": variance_rows[district_col],
+            "Job": variance_rows["_job_clean"],
+            "Circuit": variance_rows[circuit_col],
+            "Difference (£)": variance_rows["_row_variance"],
+        })
+        st.caption(f"{len(variance_table):,} rows with a variance under the current filters")
+        st.dataframe(
+            variance_table.sort_values("Difference (£)", key=abs, ascending=False),
+            height=320, use_container_width=True, hide_index=True,
+            column_config=GBP_COLUMN_CONFIG("Difference (£)"),
+        )
+ 
+        st.subheader("Difference by Job")
+        by_job = (
+            variance_rows.assign(Job=variance_rows["_job_clean"])
+            .groupby("Job")["_row_variance"].sum()
+            .reset_index()
+            .rename(columns={"_row_variance": "Difference (£)"})
+            .sort_values("Difference (£)", key=abs, ascending=False)
+        )
+        st.dataframe(
+            by_job, height=280, use_container_width=True, hide_index=True,
+            column_config=GBP_COLUMN_CONFIG("Difference (£)"),
+        )
+ 
+        st.subheader("Difference by Project")
+        if project_col in variance_rows.columns:
+            by_project = (
+                variance_rows.groupby(project_col)["_row_variance"].sum()
+                .reset_index()
+                .rename(columns={project_col: "Project", "_row_variance": "Difference (£)"})
+                .sort_values("Difference (£)", key=abs, ascending=False)
+            )
+            st.dataframe(
+                by_project, height=280, use_container_width=True, hide_index=True,
+                column_config=GBP_COLUMN_CONFIG("Difference (£)"),
+            )
