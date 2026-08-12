@@ -10,9 +10,6 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from streamlit_calendar import calendar as st_calendar
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.utils import get_column_letter
  
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
  
@@ -100,6 +97,15 @@ def build_full_calendar_excel(cal_df: pd.DataFrame) -> bytes:
     Returns raw workbook bytes, cached on the filtered dataframe's content
     so re-downloading after an unrelated widget interaction doesn't rebuild
     the whole file from scratch."""
+    # Imported here rather than at module load time, so a missing/older
+    # openpyxl install only breaks this one export button (with a clear
+    # error) instead of crashing the entire app before it can render -
+    # pd.read_excel(engine="openpyxl") elsewhere already imports it the
+    # same lazy way.
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+ 
     cal_df = cal_df.dropna(subset=["Outage Date"]).copy()
  
     header_font = Font(bold=True, color="FFFFFF", size=13)
@@ -196,6 +202,19 @@ def build_full_calendar_excel(cal_df: pd.DataFrame) -> bytes:
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
+ 
+ 
+@st.cache_data(show_spinner=False, max_entries=1, ttl=1800)
+def build_full_calendar_csv(cal_df: pd.DataFrame) -> bytes:
+    """Flat CSV export with every outage's full name spelled out.
+    Cached for the same reason as build_full_calendar_excel: the full-name
+    join is a row-by-row Python function, and without caching it would
+    re-run on every unrelated Streamlit rerun (switching tabs, clicking a
+    calendar date, adjusting an unrelated filter) - not just when the
+    download button is actually pressed."""
+    export_df = cal_df.sort_values("Outage Date").copy()
+    export_df["Full name"] = export_df.apply(_outage_full_title, axis=1)
+    return export_df.to_csv(index=False).encode("utf-8")
  
  
 @st.cache_data(show_spinner="Reading outage programme...", max_entries=2, ttl=1800)
@@ -510,6 +529,15 @@ def normalize_item(x):
     return re.sub(r"\s+", " ", s)
  
  
+def normalize_item_series(s: pd.Series) -> pd.Series:
+    """Vectorized equivalent of normalize_item() for a whole column -
+    pandas' .str methods instead of a Python function call per row."""
+    out = s.where(s.notna(), "").astype(str)
+    out = out.str.replace(r"[\u200b\u200e\u200f\xa0]", "", regex=True)
+    out = out.str.strip().str.upper()
+    return out.str.replace(r"\s+", " ", regex=True)
+ 
+ 
 def normalize_pole(p):
     """Mirrors the export tool's normalize_pole(): strips zero-width/
     directional/nbsp characters, uppercases, and removes ALL whitespace
@@ -518,6 +546,14 @@ def normalize_pole(p):
         return ""
     s = str(p).replace("\u200b", "").replace("\u200e", "").replace("\u200f", "").replace("\xa0", "").strip().upper()
     return re.sub(r"\s+", "", s)
+ 
+ 
+def normalize_pole_series(s: pd.Series) -> pd.Series:
+    """Vectorized equivalent of normalize_pole() for a whole column."""
+    out = s.where(s.notna(), "").astype(str)
+    out = out.str.replace(r"[\u200b\u200e\u200f\xa0]", "", regex=True)
+    out = out.str.strip().str.upper()
+    return out.str.replace(r"\s+", "", regex=True)
  
  
 def clean_job(value):
@@ -535,6 +571,22 @@ def clean_job(value):
     text = re.sub(r'\s{2,}', ' ', text)
     text = re.sub(r'^[\s\-\u2013_,.:]+|[\s\-\u2013_,.:]+$', '', text)
     return text.strip()
+ 
+ 
+def clean_job_series(s: pd.Series) -> pd.Series:
+    """Vectorized equivalent of clean_job() for a whole column. Same
+    substitutions, same order (GSP removed before SP so a GSP code's 'SP'
+    tail is never re-matched), just done with pandas .str.replace across
+    the whole column instead of a Python re.sub() call per row."""
+    out = s.where(s.notna(), "").astype(str).str.strip()
+    out = out.str.replace(r'^[A-Za-z]\s*-\s*', '', regex=True)
+    out = out.str.replace(r'(?i)map.*$', '', regex=True)
+    out = out.str.replace(r'(?i)\bGSP\d+\b', '', regex=True)
+    out = out.str.replace(r'(?i)\bSP\d+\b', '', regex=True)
+    out = out.str.replace(r'\b\d+\b', '', regex=True)
+    out = out.str.replace(r'\s{2,}', ' ', regex=True)
+    out = out.str.replace(r'^[\s\-\u2013_,.:]+|[\s\-\u2013_,.:]+$', '', regex=True)
+    return out.str.strip()
  
  
 # Native unit each category's qsub is recorded in - used to format the
@@ -727,7 +779,7 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     item_col = cols["item_col"]
     qsub_col = cols["qsub_col"]
  
-    df["_item_norm"] = df[item_col].apply(normalize_item)
+    df["_item_norm"] = normalize_item_series(df[item_col])
  
     # Raw (un-adjusted) quantity - mirrors what process_cv() reads directly
     # from "qsub" in the export tool, before any HV-multiplier adjustment.
@@ -750,14 +802,14 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     # normalized pole/enid, needed for CV8/CV31 pole-dedupe logic
     pole_col = cols.get("pole_col")
     if pole_col and pole_col in df.columns:
-        df["_pole_norm"] = df[pole_col].apply(normalize_pole)
+        df["_pole_norm"] = normalize_pole_series(df[pole_col])
     else:
         df["_pole_norm"] = ""
  
     # cleaned job column
     job_col = cols.get("job_col")
     if job_col and job_col in df.columns:
-        df["_job_clean"] = df[job_col].apply(clean_job)
+        df["_job_clean"] = clean_job_series(df[job_col])
     else:
         df["_job_clean"] = ""
  
@@ -860,7 +912,7 @@ with st.sidebar:
     if st.button("🧹 Clear cached data", help="Frees memory by dropping every cached file/dataframe. You'll need to re-upload files and re-pick date/filter selections afterwards."):
         st.cache_data.clear()
         st.success("Cache cleared.")
-        st.rerun()
+        (st.rerun if hasattr(st, "rerun") else st.experimental_rerun)()
  
 uploaded = st.file_uploader("Upload your parquet or CSV file", type=["parquet", "csv"])
 if not uploaded:
@@ -1077,20 +1129,23 @@ with tab_jobs:
  
         dl_col1, dl_col2, dl_col3 = st.columns([1.4, 1.1, 2])
         with dl_col1:
-            st.download_button(
-                "📥 Full calendar (Excel, calendar layout)",
-                data=build_full_calendar_excel(outage_f),
-                file_name=f"outages_calendar_{datetime.now():%Y%m%d}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                help="One sheet per month laid out like the calendar above, every outage's full name written out in full - plus a flat 'All outages' list sheet.",
-            )
+            try:
+                excel_bytes = build_full_calendar_excel(outage_f)
+            except Exception as e:
+                excel_bytes = None
+                st.error(f"Couldn't build the Excel calendar export.\n\n**Details:** {e}")
+            if excel_bytes is not None:
+                st.download_button(
+                    "📥 Full calendar (Excel, calendar layout)",
+                    data=excel_bytes,
+                    file_name=f"outages_calendar_{datetime.now():%Y%m%d}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    help="One sheet per month laid out like the calendar above, every outage's full name written out in full - plus a flat 'All outages' list sheet.",
+                )
         with dl_col2:
-            csv_export = outage_f.sort_values("Outage Date").assign(
-                **{"Full name": outage_f.apply(_outage_full_title, axis=1)}
-            )
             st.download_button(
                 "📥 Full list (CSV)",
-                data=csv_export.to_csv(index=False).encode("utf-8"),
+                data=build_full_calendar_csv(outage_f),
                 file_name=f"outages_list_{datetime.now():%Y%m%d}.csv",
                 mime="text/csv",
             )
@@ -1558,3 +1613,4 @@ with tab_totals:
                 by_project, height=280, use_container_width=True, hide_index=True,
                 column_config=GBP_COLUMN_CONFIG("Difference (£)"),
             )
+ 
