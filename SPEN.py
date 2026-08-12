@@ -1,8 +1,6 @@
 import os
 import re
-import difflib
 import io
-import calendar as py_calendar
 from datetime import datetime
  
 import pandas as pd
@@ -86,132 +84,18 @@ def _outage_full_title(row) -> str:
     return " — ".join(p for p in parts if p) or "Outage"
  
  
-@st.cache_data(show_spinner="Building calendar workbook...", max_entries=1, ttl=1800)
-def build_full_calendar_excel(cal_df: pd.DataFrame) -> bytes:
-    """Builds a downloadable .xlsx with the outage programme in the same
-    visual layout as the on-screen calendar (a month grid, Mon-Sun columns,
-    one box per day) - but every event's full name is written out in the
-    cell instead of being clipped to one line with the rest only on hover.
-    Also includes a flat 'All outages' list sheet as a plain-text safety net.
- 
-    Returns raw workbook bytes, cached on the filtered dataframe's content
-    so re-downloading after an unrelated widget interaction doesn't rebuild
-    the whole file from scratch."""
-    # Imported here rather than at module load time, so a missing/older
-    # openpyxl install only breaks this one export button (with a clear
-    # error) instead of crashing the entire app before it can render -
-    # pd.read_excel(engine="openpyxl") elsewhere already imports it the
-    # same lazy way.
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    from openpyxl.utils import get_column_letter
- 
-    cal_df = cal_df.dropna(subset=["Outage Date"]).copy()
- 
-    header_font = Font(bold=True, color="FFFFFF", size=13)
-    header_fill = PatternFill("solid", fgColor="1E3A8A")
-    weekday_fill = PatternFill("solid", fgColor="334155")
-    weekday_font = Font(bold=True, color="FFFFFF")
-    outside_fill = PatternFill("solid", fgColor="F1F5F9")
-    thin = Side(style="thin", color="CBD5E1")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    day_num_font = Font(bold=True, size=10, color="1E293B")
-    event_alignment = Alignment(wrap_text=True, vertical="top", horizontal="left")
- 
-    wb = Workbook()
-    wb.remove(wb.active)
- 
-    # ---- Flat list sheet first (every row, every column spelled out) ----
-    ws_list = wb.create_sheet("All outages (list)")
-    list_cols = ["Outage Date", "Weekday", "District", "Scheme", "Outage #", "Circuit", "PID", "SPEN PM", "POI", "Full name"]
-    for j, colname in enumerate(list_cols, start=1):
-        c = ws_list.cell(row=1, column=j, value=colname)
-        c.font = weekday_font
-        c.fill = weekday_fill
-    list_df = cal_df.sort_values("Outage Date").copy()
-    list_df["Full name"] = list_df.apply(_outage_full_title, axis=1)
-    for i, row in enumerate(list_df.itertuples(index=False), start=2):
-        row_map = row._asdict() if hasattr(row, "_asdict") else dict(zip(list_df.columns, row))
-        for j, colname in enumerate(list_cols, start=1):
-            val = row_map.get(colname, "")
-            if hasattr(val, "strftime"):
-                val = val.strftime("%Y-%m-%d")
-            ws_list.cell(row=i, column=j, value=val)
-    widths = {"Outage Date": 14, "Weekday": 12, "District": 16, "Scheme": 22, "Outage #": 12,
-              "Circuit": 16, "PID": 12, "SPEN PM": 18, "POI": 16, "Full name": 70}
-    for j, colname in enumerate(list_cols, start=1):
-        ws_list.column_dimensions[get_column_letter(j)].width = widths.get(colname, 16)
-    ws_list.freeze_panes = "A2"
- 
-    if cal_df.empty:
-        bio = io.BytesIO()
-        wb.save(bio)
-        return bio.getvalue()
- 
-    cal_df["_year"] = cal_df["Outage Date"].dt.year
-    cal_df["_month"] = cal_df["Outage Date"].dt.month
-    cal_df["_full_title"] = cal_df.apply(_outage_full_title, axis=1)
- 
-    months_present = sorted(cal_df[["_year", "_month"]].drop_duplicates().itertuples(index=False, name=None))
-    weekday_labels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
- 
-    for year, month in months_present:
-        sheet_name = f"{py_calendar.month_abbr[month]} {year}"[:31]
-        ws = wb.create_sheet(sheet_name)
- 
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
-        title_cell = ws.cell(row=1, column=1, value=f"{py_calendar.month_name[month]} {year}")
-        title_cell.font = header_font
-        title_cell.fill = header_fill
-        title_cell.alignment = Alignment(horizontal="center", vertical="center")
-        ws.row_dimensions[1].height = 24
- 
-        for i, wd in enumerate(weekday_labels, start=1):
-            c = ws.cell(row=2, column=i, value=wd)
-            c.font = weekday_font
-            c.fill = weekday_fill
-            c.alignment = Alignment(horizontal="center")
-            ws.column_dimensions[get_column_letter(i)].width = 32
- 
-        month_events = cal_df[(cal_df["_year"] == year) & (cal_df["_month"] == month)]
-        events_by_day = month_events.groupby(month_events["Outage Date"].dt.day)["_full_title"].apply(list).to_dict()
- 
-        weeks = py_calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
-        row_idx = 3
-        for week in weeks:
-            max_lines = 1
-            for col_idx, day_date in enumerate(week, start=1):
-                cell = ws.cell(row=row_idx, column=col_idx)
-                cell.border = border
-                cell.alignment = event_alignment
-                if day_date.month == month:
-                    day_events = events_by_day.get(day_date.day, [])
-                    text = str(day_date.day)
-                    if day_events:
-                        text += "\n" + "\n".join(f"• {e}" for e in day_events)
-                    cell.value = text
-                    max_lines = max(max_lines, 1 + len(day_events))
-                else:
-                    cell.value = ""
-                    cell.fill = outside_fill
-            ws.row_dimensions[row_idx].height = max(22, 15 * max_lines)
-            row_idx += 1
- 
-        ws.freeze_panes = "A3"
- 
-    bio = io.BytesIO()
-    wb.save(bio)
-    return bio.getvalue()
- 
- 
 @st.cache_data(show_spinner=False, max_entries=1, ttl=1800)
 def build_full_calendar_csv(cal_df: pd.DataFrame) -> bytes:
-    """Flat CSV export with every outage's full name spelled out.
-    Cached for the same reason as build_full_calendar_excel: the full-name
-    join is a row-by-row Python function, and without caching it would
-    re-run on every unrelated Streamlit rerun (switching tabs, clicking a
-    calendar date, adjusting an unrelated filter) - not just when the
-    download button is actually pressed."""
+    """Flat CSV export with every outage's full name spelled out - the
+    lightweight replacement for the old Excel calendar-grid export (that
+    built a styled openpyxl Workbook cell-by-cell, which was the heaviest
+    part of the recent additions). Same complete data, just as a plain
+    one-row-per-outage CSV instead of a formatted month grid.
+ 
+    Cached so the full-name join (a row-by-row Python function) only runs
+    when the outage data actually changes, not on every unrelated
+    Streamlit rerun (switching tabs, clicking a calendar date, adjusting
+    an unrelated filter) - not just when the download button is pressed."""
     export_df = cal_df.sort_values("Outage Date").copy()
     export_df["Full name"] = export_df.apply(_outage_full_title, axis=1)
     return export_df.to_csv(index=False).encode("utf-8")
@@ -606,19 +490,6 @@ def format_length(value, native_unit):
     if meters >= 1000:
         return f"{meters / 1000:,.2f} km"
     return f"{meters:,.0f} m"
- 
- 
-def dedupe_jobs(values, threshold=0.65):
-    kept, is_dup = [], []
-    for v in values:
-        if not v:
-            is_dup.append(False)
-            continue
-        hit = any(difflib.SequenceMatcher(None, v.lower(), k.lower()).ratio() >= threshold for k in kept)
-        is_dup.append(hit)
-        if not hit:
-            kept.append(v)
-    return is_dup
  
  
 def show_total_banner(label, value_str):
@@ -1127,30 +998,17 @@ with tab_jobs:
  
         st.caption(f"{len(outage_f):,} rows after outage filters")
  
-        dl_col1, dl_col2, dl_col3 = st.columns([1.4, 1.1, 2])
+        dl_col1, dl_col2 = st.columns([1.1, 3])
         with dl_col1:
-            try:
-                excel_bytes = build_full_calendar_excel(outage_f)
-            except Exception as e:
-                excel_bytes = None
-                st.error(f"Couldn't build the Excel calendar export.\n\n**Details:** {e}")
-            if excel_bytes is not None:
-                st.download_button(
-                    "📥 Full calendar (Excel, calendar layout)",
-                    data=excel_bytes,
-                    file_name=f"outages_calendar_{datetime.now():%Y%m%d}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    help="One sheet per month laid out like the calendar above, every outage's full name written out in full - plus a flat 'All outages' list sheet.",
-                )
-        with dl_col2:
             st.download_button(
-                "📥 Full list (CSV)",
+                "📥 Download full list (CSV)",
                 data=build_full_calendar_csv(outage_f),
                 file_name=f"outages_list_{datetime.now():%Y%m%d}.csv",
                 mime="text/csv",
+                help="Every outage under the filters above, one row each, with the full name spelled out in a 'Full name' column - nothing clipped or hidden behind a hover.",
             )
-        with dl_col3:
-            st.caption("Both downloads use the outage filters above (District / SPEN PM / date) and spell out every event's full name in full - nothing clipped or hidden behind a hover.")
+        with dl_col2:
+            st.caption("Uses the outage filters above (District / SPEN PM / date).")
  
         outage_view = st.radio("View", ["Table", "Calendar"], index=1, horizontal=True, key="outage_view")
  
