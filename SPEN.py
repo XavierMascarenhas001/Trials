@@ -67,40 +67,6 @@ def build_calendar_events(cal_df: pd.DataFrame) -> list:
     return events
  
  
-def _outage_full_title(row) -> str:
-    """Same 'District — Scheme — PID — Circuit — Outage # — PM — POI' text the
-    on-screen calendar puts in each event's title (see build_calendar_events),
-    but built from a single row instead of parallel lists - used for the
-    downloadable export where every name needs to be fully spelled out
-    on the page, not just available on hover."""
-    def s(v):
-        return "" if pd.isna(v) or str(v).strip() == "" else str(v).strip()
- 
-    parts = [s(row.get("District")), s(row.get("Scheme"))]
-    for label, key in [("PID", "PID"), ("Circuit", "Circuit"), ("Outage #", "Outage #"), ("PM", "SPEN PM"), ("POI", "POI")]:
-        v = s(row.get(key))
-        if v:
-            parts.append(f"{label} {v}")
-    return " — ".join(p for p in parts if p) or "Outage"
- 
- 
-@st.cache_data(show_spinner=False, max_entries=1, ttl=1800)
-def build_full_calendar_csv(cal_df: pd.DataFrame) -> bytes:
-    """Flat CSV export with every outage's full name spelled out - the
-    lightweight replacement for the old Excel calendar-grid export (that
-    built a styled openpyxl Workbook cell-by-cell, which was the heaviest
-    part of the recent additions). Same complete data, just as a plain
-    one-row-per-outage CSV instead of a formatted month grid.
- 
-    Cached so the full-name join (a row-by-row Python function) only runs
-    when the outage data actually changes, not on every unrelated
-    Streamlit rerun (switching tabs, clicking a calendar date, adjusting
-    an unrelated filter) - not just when the download button is pressed."""
-    export_df = cal_df.sort_values("Outage Date").copy()
-    export_df["Full name"] = export_df.apply(_outage_full_title, axis=1)
-    return export_df.to_csv(index=False).encode("utf-8")
- 
- 
 @st.cache_data(show_spinner="Reading outage programme...", max_entries=2, ttl=1800)
 def load_outage_programme(file_bytes: bytes):
     """Cached on the uploaded file's bytes - re-parses only when a
@@ -1009,18 +975,6 @@ with tab_jobs:
  
         st.caption(f"{len(outage_f):,} rows after outage filters")
  
-        dl_col1, dl_col2 = st.columns([1.1, 3])
-        with dl_col1:
-            st.download_button(
-                "📥 Download full list (CSV)",
-                data=build_full_calendar_csv(outage_f),
-                file_name=f"outages_list_{datetime.now():%Y%m%d}.csv",
-                mime="text/csv",
-                help="Every outage under the filters above, one row each, with the full name spelled out in a 'Full name' column - nothing clipped or hidden behind a hover.",
-            )
-        with dl_col2:
-            st.caption("Uses the outage filters above (District / SPEN PM / date).")
- 
         outage_view = st.radio("View", ["Table", "Calendar"], index=1, horizontal=True, key="outage_view")
  
         if outage_view == "Table":
@@ -1482,4 +1436,3 @@ with tab_totals:
                 by_project, height=280, use_container_width=True, hide_index=True,
                 column_config=GBP_COLUMN_CONFIG("Difference (£)"),
             )
- 
