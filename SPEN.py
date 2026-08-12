@@ -2,23 +2,27 @@ import os
 import re
 import difflib
 import io
+import calendar as py_calendar
 from datetime import datetime
-
+ 
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from streamlit_calendar import calendar as st_calendar
-
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
+ 
 st.set_page_config(page_title="Network Job Tracker", layout="wide")
-
+ 
 # ============================================================
 # OUTAGES PROGRAMME (uploaded by the user - not read from the network)
 # ============================================================
 # Streamlit Cloud has no access to internal UNC/network paths, so the
 # workbook is uploaded via a file_uploader instead of read from disk.
-
-
+ 
+ 
 @st.cache_data(show_spinner=False, max_entries=5)
 def build_calendar_events(cal_df: pd.DataFrame) -> list:
     """Vectorized FullCalendar event build (zip over plain Python lists,
@@ -28,7 +32,7 @@ def build_calendar_events(cal_df: pd.DataFrame) -> list:
     palette = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#be185d", "#4d7c0f"]
     districts_sorted = sorted(cal_df["District"].dropna().unique())
     district_colors = {d: palette[i % len(palette)] for i, d in enumerate(districts_sorted)}
-
+ 
     starts = cal_df["Outage Date"].dt.strftime("%Y-%m-%d").tolist()
     districts = cal_df["District"].tolist()
     schemes = cal_df["Scheme"].tolist()
@@ -37,10 +41,10 @@ def build_calendar_events(cal_df: pd.DataFrame) -> list:
     pids_evt = cal_df["PID"].tolist()
     pms_evt = cal_df["SPEN PM"].tolist()
     pois_evt = cal_df["POI"].tolist()
-
+ 
     def _evt_str(v):
         return "" if pd.isna(v) or str(v).strip() == "" else str(v).strip()
-
+ 
     events = []
     for start, district, scheme, onum, circuit, pid, pm, poi in zip(
         starts, districts, schemes, outage_nums, circuits_evt, pids_evt, pms_evt, pois_evt
@@ -66,14 +70,140 @@ def build_calendar_events(cal_df: pd.DataFrame) -> list:
             "borderColor": color,
         })
     return events
-
-
+ 
+ 
+def _outage_full_title(row) -> str:
+    """Same 'District — Scheme — PID — Circuit — Outage # — PM — POI' text the
+    on-screen calendar puts in each event's title (see build_calendar_events),
+    but built from a single row instead of parallel lists - used for the
+    downloadable export where every name needs to be fully spelled out
+    on the page, not just available on hover."""
+    def s(v):
+        return "" if pd.isna(v) or str(v).strip() == "" else str(v).strip()
+ 
+    parts = [s(row.get("District")), s(row.get("Scheme"))]
+    for label, key in [("PID", "PID"), ("Circuit", "Circuit"), ("Outage #", "Outage #"), ("PM", "SPEN PM"), ("POI", "POI")]:
+        v = s(row.get(key))
+        if v:
+            parts.append(f"{label} {v}")
+    return " — ".join(p for p in parts if p) or "Outage"
+ 
+ 
+@st.cache_data(show_spinner="Building calendar workbook...", max_entries=3)
+def build_full_calendar_excel(cal_df: pd.DataFrame) -> bytes:
+    """Builds a downloadable .xlsx with the outage programme in the same
+    visual layout as the on-screen calendar (a month grid, Mon-Sun columns,
+    one box per day) - but every event's full name is written out in the
+    cell instead of being clipped to one line with the rest only on hover.
+    Also includes a flat 'All outages' list sheet as a plain-text safety net.
+ 
+    Returns raw workbook bytes, cached on the filtered dataframe's content
+    so re-downloading after an unrelated widget interaction doesn't rebuild
+    the whole file from scratch."""
+    cal_df = cal_df.dropna(subset=["Outage Date"]).copy()
+ 
+    header_font = Font(bold=True, color="FFFFFF", size=13)
+    header_fill = PatternFill("solid", fgColor="1E3A8A")
+    weekday_fill = PatternFill("solid", fgColor="334155")
+    weekday_font = Font(bold=True, color="FFFFFF")
+    outside_fill = PatternFill("solid", fgColor="F1F5F9")
+    thin = Side(style="thin", color="CBD5E1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    day_num_font = Font(bold=True, size=10, color="1E293B")
+    event_alignment = Alignment(wrap_text=True, vertical="top", horizontal="left")
+ 
+    wb = Workbook()
+    wb.remove(wb.active)
+ 
+    # ---- Flat list sheet first (every row, every column spelled out) ----
+    ws_list = wb.create_sheet("All outages (list)")
+    list_cols = ["Outage Date", "Weekday", "District", "Scheme", "Outage #", "Circuit", "PID", "SPEN PM", "POI", "Full name"]
+    for j, colname in enumerate(list_cols, start=1):
+        c = ws_list.cell(row=1, column=j, value=colname)
+        c.font = weekday_font
+        c.fill = weekday_fill
+    list_df = cal_df.sort_values("Outage Date").copy()
+    list_df["Full name"] = list_df.apply(_outage_full_title, axis=1)
+    for i, row in enumerate(list_df.itertuples(index=False), start=2):
+        row_map = row._asdict() if hasattr(row, "_asdict") else dict(zip(list_df.columns, row))
+        for j, colname in enumerate(list_cols, start=1):
+            val = row_map.get(colname, "")
+            if hasattr(val, "strftime"):
+                val = val.strftime("%Y-%m-%d")
+            ws_list.cell(row=i, column=j, value=val)
+    widths = {"Outage Date": 14, "Weekday": 12, "District": 16, "Scheme": 22, "Outage #": 12,
+              "Circuit": 16, "PID": 12, "SPEN PM": 18, "POI": 16, "Full name": 70}
+    for j, colname in enumerate(list_cols, start=1):
+        ws_list.column_dimensions[get_column_letter(j)].width = widths.get(colname, 16)
+    ws_list.freeze_panes = "A2"
+ 
+    if cal_df.empty:
+        bio = io.BytesIO()
+        wb.save(bio)
+        return bio.getvalue()
+ 
+    cal_df["_year"] = cal_df["Outage Date"].dt.year
+    cal_df["_month"] = cal_df["Outage Date"].dt.month
+    cal_df["_full_title"] = cal_df.apply(_outage_full_title, axis=1)
+ 
+    months_present = sorted(cal_df[["_year", "_month"]].drop_duplicates().itertuples(index=False, name=None))
+    weekday_labels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+ 
+    for year, month in months_present:
+        sheet_name = f"{py_calendar.month_abbr[month]} {year}"[:31]
+        ws = wb.create_sheet(sheet_name)
+ 
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
+        title_cell = ws.cell(row=1, column=1, value=f"{py_calendar.month_name[month]} {year}")
+        title_cell.font = header_font
+        title_cell.fill = header_fill
+        title_cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 24
+ 
+        for i, wd in enumerate(weekday_labels, start=1):
+            c = ws.cell(row=2, column=i, value=wd)
+            c.font = weekday_font
+            c.fill = weekday_fill
+            c.alignment = Alignment(horizontal="center")
+            ws.column_dimensions[get_column_letter(i)].width = 32
+ 
+        month_events = cal_df[(cal_df["_year"] == year) & (cal_df["_month"] == month)]
+        events_by_day = month_events.groupby(month_events["Outage Date"].dt.day)["_full_title"].apply(list).to_dict()
+ 
+        weeks = py_calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
+        row_idx = 3
+        for week in weeks:
+            max_lines = 1
+            for col_idx, day_date in enumerate(week, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.border = border
+                cell.alignment = event_alignment
+                if day_date.month == month:
+                    day_events = events_by_day.get(day_date.day, [])
+                    text = str(day_date.day)
+                    if day_events:
+                        text += "\n" + "\n".join(f"• {e}" for e in day_events)
+                    cell.value = text
+                    max_lines = max(max_lines, 1 + len(day_events))
+                else:
+                    cell.value = ""
+                    cell.fill = outside_fill
+            ws.row_dimensions[row_idx].height = max(22, 15 * max_lines)
+            row_idx += 1
+ 
+        ws.freeze_panes = "A3"
+ 
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+ 
+ 
 @st.cache_data(show_spinner="Reading outage programme...", max_entries=3)
 def load_outage_programme(file_bytes: bytes):
     """Cached on the uploaded file's bytes - re-parses only when a
     different file (or a changed version of the same file) is uploaded,
     not on every rerun/widget interaction.
-
+ 
     Returns (df, error_message). Never raises - if the uploaded workbook
     doesn't have a '2026' sheet in the expected layout, this should show a
     clean st.error rather than crash the whole app."""
@@ -94,8 +224,8 @@ def load_outage_programme(file_bytes: bytes):
         return df, None
     except Exception as e:
         return None, str(e)
-
-
+ 
+ 
 # ============================================================
 # YOUR MAPPING DICTIONARIES
 # ============================================================
@@ -275,14 +405,14 @@ CV8 = {
     "Remove LV cable termination": "CV8",
     "Repair pole twist - including unbind / rebind.": "CV8",
 }
-
+ 
 POLE_CATEGORIES = {
     "CV7_erect": CV7_erect,
     "CV7_erect_H": CV7_erect_H,
     "CV7_erect_lv": CV7_erect_lv,
     "CV7_recover": CV7_recover,
 }
-
+ 
 # Friendly labels for the pole chart/cards, in the "Display (technical_name)"
 # style so it's obvious which export-tool category each bar corresponds to.
 POLE_DISPLAY_NAMES = {
@@ -291,7 +421,7 @@ POLE_DISPLAY_NAMES = {
     "CV7_erect_lv": "CV7 LV Pole (CV7_erect_lv)",
     "CV7_recover": "CV7 Recover (CV7_recover)",
 }
-
+ 
 # NOTE: CV7_SWITCHGEAR / CV7_UG / CV7_CB were removed from ALL_CATEGORIES.
 # In the export tool, `categories` gets redefined a second time and that
 # second definition (the one actually used to build sheets/Summary) never
@@ -312,12 +442,12 @@ ALL_CATEGORIES = {
     "CV31": CV31,
     "CV8": CV8,
 }
-
+ 
 # Categories that use the exporter's process_cv() logic instead of a plain
 # sum: dedupe by pole, drop zero-qty rows, exclude poles already counted
 # under a CV7 erect/recover item, then COUNT distinct poles (not sum qty).
 POLE_DEDUPE_CATEGORIES = {"CV8", "CV31"}
-
+ 
 # Switch is split into three sub-types for display instead of one lump
 # card. Each key is the display name, each value is the list of raw
 # descriptions (as written in the Switch dict above) that count toward it.
@@ -330,7 +460,7 @@ SWITCH_SUBTYPES = {
         "33kv ABSW Hookstick Dependant",
     ],
 }
-
+ 
 # ============================================================
 # IMAGE GROUPS for the Mapped Items tab
 # Images live in an "Images" folder alongside this script (same repo path).
@@ -366,10 +496,10 @@ CARD_GROUPS = [
         "subtypes": SWITCH_SUBTYPES,
     },
 ]
-
+ 
 HV_POLE_KEY = "Recover 'A' / 'H' pole, up to and including 15 metres in height, and reinstate, all ground conditions"
 HV_POLE_MULTIPLIER = 2
-
+ 
 # ============================================================
 # HELPERS (aligned with the export script's normalization)
 # ============================================================
@@ -378,8 +508,8 @@ def normalize_item(x):
         return ""
     s = str(x).replace("\u200b", "").replace("\u200e", "").replace("\u200f", "").replace("\xa0", "").strip().upper()
     return re.sub(r"\s+", " ", s)
-
-
+ 
+ 
 def normalize_pole(p):
     """Mirrors the export tool's normalize_pole(): strips zero-width/
     directional/nbsp characters, uppercases, and removes ALL whitespace
@@ -388,8 +518,8 @@ def normalize_pole(p):
         return ""
     s = str(p).replace("\u200b", "").replace("\u200e", "").replace("\u200f", "").replace("\xa0", "").strip().upper()
     return re.sub(r"\s+", "", s)
-
-
+ 
+ 
 def clean_job(value):
     """Strip leading 'C -'/'M -' prefix, cut at 'map', drop SPxxxx/GSPxxxx/bare digits."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -405,8 +535,8 @@ def clean_job(value):
     text = re.sub(r'\s{2,}', ' ', text)
     text = re.sub(r'^[\s\-\u2013_,.:]+|[\s\-\u2013_,.:]+$', '', text)
     return text.strip()
-
-
+ 
+ 
 # Native unit each category's qsub is recorded in - used to format the
 # mapped-item cards for conductor lengths.
 UNIT_CONFIG = {
@@ -415,8 +545,8 @@ UNIT_CONFIG = {
     "CV7_OHL_CONDUCTOR_instal": "km",
     "CV7_OHL_CONDUCTOR_LV_instal": "km",
 }
-
-
+ 
+ 
 def format_length(value, native_unit):
     """Converts value (in native_unit) to meters, then displays in km if
     the meters equivalent is >=1000, otherwise in meters."""
@@ -424,8 +554,8 @@ def format_length(value, native_unit):
     if meters >= 1000:
         return f"{meters / 1000:,.2f} km"
     return f"{meters:,.0f} m"
-
-
+ 
+ 
 def dedupe_jobs(values, threshold=0.65):
     kept, is_dup = [], []
     for v in values:
@@ -437,8 +567,8 @@ def dedupe_jobs(values, threshold=0.65):
         if not hit:
             kept.append(v)
     return is_dup
-
-
+ 
+ 
 def show_total_banner(label, value_str):
     """A large, centered KPI number - meant to sit directly under a chart's
     subheader so the total is the first thing seen after the title."""
@@ -451,8 +581,8 @@ def show_total_banner(label, value_str):
         """,
         unsafe_allow_html=True,
     )
-
-
+ 
+ 
 @st.cache_data(show_spinner=False, max_entries=8)
 def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, pole_col) -> pd.DataFrame:
     """Work Instructions for a single date, as a table instead of a Word
@@ -464,7 +594,7 @@ def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, po
     """
     if day_df.empty or item_col not in day_df.columns or qsub_col not in day_df.columns:
         return pd.DataFrame(columns=["Pole", "Task", "Qty", "Erect"])
-
+ 
     pole_vals = (
         day_df[pole_col].astype(str).str.strip()
         if pole_col and pole_col in day_df.columns
@@ -475,14 +605,14 @@ def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, po
         "Task": day_df[item_col].astype(str).str.strip(),
         "Qty": day_df[qsub_col],
     })
-
+ 
     bad = {"", "nan", "none", "nat", "0"}
     out = out[~out["Pole"].str.lower().isin(bad) & ~out["Task"].str.lower().isin(bad)]
     if out.empty:
         return pd.DataFrame(columns=["Pole", "Task", "Qty", "Erect"])
-
+ 
     out["Erect"] = out["Task"].str.contains("erect", case=False, na=False).map({True: "Yes", False: ""})
-
+ 
     # pole-first order (same idea as the workpacks tool's _dedup_keep_order):
     # each pole's rows stay together, ordered by that pole's first appearance.
     pole_order = out["Pole"].drop_duplicates().tolist()
@@ -490,8 +620,8 @@ def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, po
     out = out.sort_values("Pole", kind="stable").reset_index(drop=True)
     out["Pole"] = out["Pole"].astype(str)
     return out
-
-
+ 
+ 
 @st.cache_data(show_spinner=False, max_entries=8)
 def render_pole_task_table_html(df: pd.DataFrame) -> str:
     """Renders build_pole_task_table()'s output with the Pole column
@@ -502,18 +632,18 @@ def render_pole_task_table_html(df: pd.DataFrame) -> str:
     the workpacks tool's docx highlighting."""
     if df.empty:
         return ""
-
+ 
     def esc(v):
         if v is None or (isinstance(v, float) and pd.isna(v)):
             return ""
         return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
+ 
     poles = df["Pole"].tolist()
     tasks = df["Task"].tolist()
     qtys = df["Qty"].tolist()
     erects = df["Erect"].tolist()
     n = len(poles)
-
+ 
     band_colors = ["#ffffff", "#eef2f7"]
     rows_html = []
     i, band = 0, 0
@@ -547,7 +677,7 @@ def render_pole_task_table_html(df: pd.DataFrame) -> str:
             )
             rows_html.append("<tr>" + "".join(cells) + "</tr>")
         i = j + 1
-
+ 
     header = (
         "<tr style='background:#1e3a8a;color:#ffffff;'>"
         "<th style='padding:8px 10px;text-align:left;'>Pole</th>"
@@ -561,8 +691,8 @@ def render_pole_task_table_html(df: pd.DataFrame) -> str:
         "<table style='width:100%;border-collapse:collapse;font-size:13px;'>"
         f"<thead>{header}</thead><tbody>{''.join(rows_html)}</tbody></table></div>"
     )
-
-
+ 
+ 
 @st.cache_data(max_entries=3)
 def read_file(file):
     """Returns (df, error_message). Never raises - a malformed upload
@@ -576,12 +706,12 @@ def read_file(file):
         return df, None
     except Exception as e:
         return None, str(e)
-
-
+ 
+ 
 @st.cache_data(show_spinner="Processing data...", max_entries=3)
 def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     """cols: the resolved {logical_name: real_column_name} mapping picked in the sidebar.
-
+ 
     Cached: Streamlit reruns the whole script on every filter/widget change,
     which would otherwise re-run normalize_item() over every row and rebuild
     the category lookup on every single interaction. This only recomputes
@@ -589,48 +719,48 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     df = df.copy()
     item_col = cols["item_col"]
     qsub_col = cols["qsub_col"]
-
+ 
     df["_item_norm"] = df[item_col].apply(normalize_item)
-
+ 
     # Raw (un-adjusted) quantity - mirrors what process_cv() reads directly
     # from "qsub" in the export tool, before any HV-multiplier adjustment.
     df["_qsub_raw"] = pd.to_numeric(df[qsub_col], errors="coerce").fillna(0)
-
+ 
     # HV pole recovery counts double (applied like the export tool's
     # df.loc[hv_pole_mask, col] *= HV_POLE_MULTIPLIER)
     hv_key_norm = normalize_item(HV_POLE_KEY)
     hv_mask = df["_item_norm"] == hv_key_norm
     df["_qsub_adj"] = df["_qsub_raw"]
     df.loc[hv_mask, "_qsub_adj"] *= HV_POLE_MULTIPLIER
-
+ 
     # map every item to its category
     item_to_cat = {}
     for cat_name, mapping in ALL_CATEGORIES.items():
         for desc, label in mapping.items():
             item_to_cat[normalize_item(desc)] = label
     df["_mapped_category"] = df["_item_norm"].map(item_to_cat)
-
+ 
     # normalized pole/enid, needed for CV8/CV31 pole-dedupe logic
     pole_col = cols.get("pole_col")
     if pole_col and pole_col in df.columns:
         df["_pole_norm"] = df[pole_col].apply(normalize_pole)
     else:
         df["_pole_norm"] = ""
-
+ 
     # cleaned job column
     job_col = cols.get("job_col")
     if job_col and job_col in df.columns:
         df["_job_clean"] = df[job_col].apply(clean_job)
     else:
         df["_job_clean"] = ""
-
+ 
     # date column
     date_col = cols.get("date_col")
     df["_date"] = pd.to_datetime(df[date_col], errors="coerce") if date_col and date_col in df.columns else pd.NaT
-
+ 
     return df
-
-
+ 
+ 
 @st.cache_data(show_spinner=False, max_entries=5)
 def cv7_dedupe_poles(frame: pd.DataFrame) -> set:
     """Poles already covered by a CV7 erect/recover item - mirrors the
@@ -642,8 +772,8 @@ def cv7_dedupe_poles(frame: pd.DataFrame) -> set:
     poles = set(frame.loc[frame["_item_norm"].isin(keys), "_pole_norm"].dropna())
     poles.discard("")
     return poles
-
-
+ 
+ 
 def cv_pole_resume(frame: pd.DataFrame, mapping: dict, cv7_poles: set) -> pd.DataFrame:
     """Mirrors the export tool's process_cv(): filter by item, drop
     zero-qty rows, dedupe by pole (keep first), exclude poles already
@@ -654,8 +784,8 @@ def cv_pole_resume(frame: pd.DataFrame, mapping: dict, cv7_poles: set) -> pd.Dat
     sub = sub.drop_duplicates(subset="_pole_norm")
     sub = sub[~sub["_pole_norm"].isin(cv7_poles)]
     return sub
-
-
+ 
+ 
 def build_card(frame: pd.DataFrame, cat_name: str, mapping: dict, cv7_poles: set):
     """Returns (cat_name, total_qty, sub) for a single category, filtered
     strictly by that category's OWN item keys - never by the shared
@@ -673,16 +803,16 @@ def build_card(frame: pd.DataFrame, cat_name: str, mapping: dict, cv7_poles: set
         if sub.empty:
             return None
         return (cat_name, sub["_qsub_adj"].sum(), sub)
-
-
+ 
+ 
 def build_subtype_card(frame: pd.DataFrame, subtype_name: str, descriptions: list):
     keys = {normalize_item(d) for d in descriptions}
     sub = frame[frame["_item_norm"].isin(keys)]
     if sub.empty:
         return None
     return (subtype_name, sub["_qsub_adj"].sum(), sub)
-
-
+ 
+ 
 def render_metric(slot, cat_name: str, total_qty, display_name: str = None):
     label = display_name or cat_name
     if cat_name in UNIT_CONFIG:
@@ -691,8 +821,8 @@ def render_metric(slot, cat_name: str, total_qty, display_name: str = None):
         slot.metric(label, f"{total_qty:,.0f} poles")
     else:
         slot.metric(label, f"{total_qty:,.0f}")
-
-
+ 
+ 
 # ============================================================
 # APP
 # ============================================================
@@ -710,36 +840,36 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
+ 
 st.title("⚡ Network Job Tracker Dashboard")
-
+ 
 uploaded = st.file_uploader("Upload your parquet or CSV file", type=["parquet", "csv"])
 if not uploaded:
     st.info("Upload the parquet/CSV file your export script normally reads, then filters and charts appear below.")
     st.stop()
-
+ 
 raw_df, read_err = read_file(uploaded)
 if read_err:
     st.error(f"Couldn't read that file - it may be corrupted or not a valid CSV/parquet file.\n\n**Details:** {read_err}")
     st.stop()
-
+ 
 with st.expander("Detected columns in your file (click to view)"):
     st.write(list(raw_df.columns))
-
-
+ 
+ 
 def guess(*candidates):
     """Returns the first candidate that exists as a real column, or None if none match."""
     for c in candidates:
         if c in raw_df.columns:
             return c
     return None
-
-
+ 
+ 
 with st.sidebar.expander("⚙️ Column mapping (advanced)", expanded=False):
     st.caption("Confirm each field maps to the right column in your file.")
     col_options = list(raw_df.columns)
     none_option = ["(none)"] + col_options
-
+ 
     def pick(label, default_col, key):
         opts = none_option
         idx = opts.index(default_col) if default_col in opts else 0
@@ -747,7 +877,7 @@ with st.sidebar.expander("⚙️ Column mapping (advanced)", expanded=False):
             st.warning(f"Couldn't guess a column for **{label}** - pick one.")
         val = st.selectbox(label, opts, index=idx, key=key)
         return None if val == "(none)" else val
-
+ 
     cols = {
         "item_col": pick("Description / item", guess("item", "description"), "map_item"),
         "qsub_col": pick("Quantity (qsub)", guess("qsub", "quantity_used"), "map_qsub"),
@@ -761,41 +891,41 @@ with st.sidebar.expander("⚙️ Column mapping (advanced)", expanded=False):
         "job_col": pick("Job", guess("job", "sourcefile"), "map_job"),
         "date_col": pick("Date", guess("datetouse", "date", "plan1", "done"), "map_date"),
     }
-
+ 
 missing_required = [k for k in ["item_col", "qsub_col", "district_col", "circuit_col"] if cols[k] is None]
 if missing_required:
     st.error(f"These required fields still need a column picked in the sidebar 'Column mapping' section: {missing_required}")
     st.stop()
-
+ 
 if cols.get("pole_col") is None:
     st.sidebar.warning("No Pole/enid column selected - CV8 and CV31 counts can't be deduplicated by pole and will be shown as raw row counts, which may not match the export tool.")
-
+ 
 df = process_data(raw_df, cols)
-
+ 
 district_col, project_col, circuit_col = cols["district_col"], cols["project_col"], cols["circuit_col"]
-
+ 
 # ---- Sidebar filters ----
 st.sidebar.header("🔍 Filters")
-
+ 
 if df["_date"].notna().any():
     min_d, max_d = df["_date"].min(), df["_date"].max()
     date_range = st.sidebar.date_input("Date", value=(min_d.date(), max_d.date()))
 else:
     date_range = None
     st.sidebar.caption("No usable dates found in the selected Date column.")
-
-
+ 
+ 
 def multiselect_filter(label, col, key):
     if not col or col not in df.columns:
         return []
     opts = sorted(df[col].dropna().astype(str).unique())
     return st.sidebar.multiselect(label, opts, key=key)
-
-
+ 
+ 
 districts = multiselect_filter("District", district_col, "f_district")
 projects = multiselect_filter("Project", project_col, "f_project")
 circuits = multiselect_filter("Circuit", circuit_col, "f_circuit")
-
+ 
 f = df.copy()
 if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start, end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
@@ -806,14 +936,14 @@ if projects:
     f = f[f[project_col].astype(str).isin(projects)]
 if circuits:
     f = f[f[circuit_col].astype(str).isin(circuits)]
-
+ 
 st.sidebar.divider()
 st.sidebar.metric("Rows after filters", f"{len(f):,}", delta=f"of {len(df):,} total")
-
+ 
 tab_overview, tab_jobs, tab_items, tab_forecast, tab_totals = st.tabs(
     ["📊 Overview", "🗂️ Jobs", "📦 Mapped Items", "📈 Pole Position", "💰 Totals"]
 )
-
+ 
 # ---- Overview: CV7_recover over time ----
 with tab_overview:
     st.subheader("CV7_recover — count over time")
@@ -821,7 +951,7 @@ with tab_overview:
     recover_df = f[f["_item_norm"].isin(recover_keys)]
     recover_total = recover_df["_qsub_adj"].sum()
     show_total_banner("Total CV7_recover count", f"{recover_total:,.0f}")
-
+ 
     if recover_df.empty or recover_df["_date"].isna().all():
         st.caption("No CV7_recover records (with a date) for the current filters.")
     else:
@@ -839,7 +969,7 @@ with tab_overview:
         fig.update_traces(marker_color="#2563eb")
         fig.update_layout(margin=dict(t=10, b=10))
         st.plotly_chart(fig, use_container_width=True)
-
+ 
     st.subheader("All pole categories (erect only)")
     # Grouped by SOURCE category (CV7_erect / CV7_erect_H / CV7_erect_lv),
     # not by the shared "_mapped_category" label - several of these
@@ -859,28 +989,28 @@ with tab_overview:
                 "Count": sub["_qsub_adj"].sum(),
             })
     pole_summary = pd.DataFrame(pole_rows)
-
+ 
     pole_total = pole_summary["Count"].sum() if not pole_summary.empty else 0
     show_total_banner("Total poles (all categories)", f"{pole_total:,.0f}")
-
+ 
     if not pole_summary.empty:
         fig2 = px.bar(pole_summary, x="Pole type", y="Count", text="Count", color="Pole type")
         fig2.update_layout(showlegend=False, margin=dict(t=10, b=10))
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.caption("No pole records for the current filters.")
-
+ 
 # ---- Jobs tab ----
 with tab_jobs:
     # ---- Outages Programme (uploaded workbook, cached on file content) ----
     st.subheader("Outages Programme 2026")
-
+ 
     outage_upload = st.file_uploader(
         "Upload High-level_planning_2026.xlsx",
         type=["xlsx"],
         key="outage_file_uploader",
     )
-
+ 
     if outage_upload is None:
         st.info("Upload the outages programme workbook (sheet '2026', header on row 7) to see it here.")
         outage_df = None
@@ -892,10 +1022,10 @@ with tab_jobs:
                 f"**Details:** {outage_err}"
             )
             outage_df = None
-
+ 
     if outage_df is not None:
         st.caption(f"{len(outage_df):,} rows from High-level_planning_2026.xlsx (sheet '2026')")
-
+ 
         oc1, oc2, oc3 = st.columns(3)
         with oc1:
             outage_districts = st.multiselect(
@@ -913,7 +1043,7 @@ with tab_jobs:
                 )
             else:
                 outage_date_range = None
-
+ 
         outage_f = outage_df.copy()
         if outage_districts:
             outage_f = outage_f[outage_f["District"].isin(outage_districts)]
@@ -923,17 +1053,39 @@ with tab_jobs:
             o_start = pd.Timestamp(outage_date_range[0])
             o_end = pd.Timestamp(outage_date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
             outage_f = outage_f[outage_f["Outage Date"].between(o_start, o_end)]
-
+ 
         st.caption(f"{len(outage_f):,} rows after outage filters")
-
+ 
+        dl_col1, dl_col2, dl_col3 = st.columns([1.4, 1.1, 2])
+        with dl_col1:
+            st.download_button(
+                "📥 Full calendar (Excel, calendar layout)",
+                data=build_full_calendar_excel(outage_f),
+                file_name=f"outages_calendar_{datetime.now():%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="One sheet per month laid out like the calendar above, every outage's full name written out in full - plus a flat 'All outages' list sheet.",
+            )
+        with dl_col2:
+            csv_export = outage_f.sort_values("Outage Date").assign(
+                **{"Full name": outage_f.apply(_outage_full_title, axis=1)}
+            )
+            st.download_button(
+                "📥 Full list (CSV)",
+                data=csv_export.to_csv(index=False).encode("utf-8"),
+                file_name=f"outages_list_{datetime.now():%Y%m%d}.csv",
+                mime="text/csv",
+            )
+        with dl_col3:
+            st.caption("Both downloads use the outage filters above (District / SPEN PM / date) and spell out every event's full name in full - nothing clipped or hidden behind a hover.")
+ 
         outage_view = st.radio("View", ["Table", "Calendar"], index=1, horizontal=True, key="outage_view")
-
+ 
         if outage_view == "Table":
             st.dataframe(outage_f, height=420, use_container_width=True, hide_index=True)
         else:
             cal_df = outage_f.dropna(subset=["Outage Date"])
             events = build_calendar_events(cal_df)
-
+ 
             calendar_options = {
                 "initialView": "dayGridMonth",
                 "headerToolbar": {
@@ -955,7 +1107,7 @@ with tab_jobs:
                 # with dozens of outages on one day starts to feel sluggish).
                 "dayMaxEvents": False,
             }
-
+ 
             # Keeps each event on a single line (ellipsis instead of wrapping onto a
             # second/third line and breaking the day cell's height/layout). The full
             # text is still there in the "title" attribute above, so hovering an
@@ -970,7 +1122,7 @@ with tab_jobs:
                 .fc-daygrid-day-number { cursor: pointer; }
                 .fc-daygrid-day:hover { background-color: #eef2ff; }
             """
-
+ 
             # dateClick/eventClick re-enabled (each click now costs a Streamlit
             # rerun) so a click can drive the breakdown + Work Instructions table
             # below - callbacks=[] previously traded that away for speed. The
@@ -984,7 +1136,7 @@ with tab_jobs:
                 callbacks=["dateClick", "eventClick"],
                 key="outage_calendar",
             )
-
+ 
             clicked_date = None
             if calendar_result.get("eventClick"):
                 ev_start = calendar_result["eventClick"].get("event", {}).get("start")
@@ -995,12 +1147,12 @@ with tab_jobs:
                 dc_date = dc.get("date") or dc.get("dateStr")
                 if dc_date:
                     clicked_date = pd.to_datetime(dc_date).date()
-
+ 
             if clicked_date is not None:
                 st.session_state["selected_outage_date"] = clicked_date
-
+ 
             selected_date = st.session_state.get("selected_outage_date")
-
+ 
             st.divider()
             if selected_date is None:
                 st.caption("Click a date or an outage above to see its full breakdown and Work Instructions here.")
@@ -1011,7 +1163,7 @@ with tab_jobs:
                     st.caption("No outages on this date under the current filters.")
                 else:
                     st.dataframe(day_rows, use_container_width=True, hide_index=True)
-
+ 
                 st.markdown(f"**Work Instructions — poles & MD Poling tasks on {selected_date:%d %b %Y}**")
                 if cols.get("date_col") is None or f["_date"].isna().all():
                     st.caption(
@@ -1028,17 +1180,17 @@ with tab_jobs:
                     else:
                         st.caption(f"{pole_task_df['Pole'].nunique():,} pole(s) · {len(pole_task_df):,} task row(s)")
                         st.markdown(render_pole_task_table_html(pole_task_df), unsafe_allow_html=True)
-
+ 
 # ---- Mapped items tab: image-led groups, then the rest as a card grid ----
 with tab_items:
     st.subheader("Mapped items")
-
+ 
     cv7_poles = cv7_dedupe_poles(f)
     all_card_data = []  # accumulated in display order, feeds the detail selectbox below
-
+ 
     grouped_cat_names = {c for group in CARD_GROUPS for c in group.get("categories", [])}
     grouped_cat_names |= {c for group in CARD_GROUPS if "subtypes" in group for c in ["Switch"]}
-
+ 
     for group in CARD_GROUPS:
         title = group["title"]
         img_l, img_c, img_r = st.columns([1, 1, 1])
@@ -1049,9 +1201,9 @@ with tab_items:
                 st.image(image_path, width=300)
             elif image_path:
                 st.caption(f"⚠️ Image not found: {image_path}")
-
+ 
         group_cards = []
-
+ 
         if "subtypes" in group:
             for subtype_name, descriptions in group["subtypes"].items():
                 card = build_subtype_card(f, subtype_name, descriptions)
@@ -1067,16 +1219,16 @@ with tab_items:
                 if card:
                     group_cards.append(card)
                     all_card_data.append(card)
-
+ 
         if group_cards:
             row_cols = st.columns(len(group_cards))
             for slot, (cat_name, total_qty, _sub) in zip(row_cols, group_cards):
                 render_metric(slot, cat_name, total_qty, display_name=POLE_DISPLAY_NAMES.get(cat_name))
         else:
             st.caption("No records for this group under the current filters.")
-
+ 
         st.divider()
-
+ 
     # Everything not already shown in an image group, same grid as before
     remaining_cat_names = [c for c in ALL_CATEGORIES if c not in grouped_cat_names]
     remaining_cards = []
@@ -1085,7 +1237,7 @@ with tab_items:
         if card:
             remaining_cards.append(card)
             all_card_data.append(card)
-
+ 
     if remaining_cards:
         st.markdown("**Other items**")
         n_cols = 4
@@ -1094,7 +1246,7 @@ with tab_items:
             row_cols = st.columns(n_cols)
             for slot, (cat_name, total_qty, _sub) in zip(row_cols, row):
                 render_metric(slot, cat_name, total_qty)
-
+ 
     if not all_card_data:
         st.caption("No mapped items for the current filters.")
     else:
@@ -1108,7 +1260,7 @@ with tab_items:
             "enid": sub[cols["pole_col"]] if cols["pole_col"] in sub.columns else "",
         })
         st.dataframe(detail, height=320, use_container_width=True, hide_index=True)
-
+ 
 # ---- Poles Forecast tab ----
 @st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
 def list_forecast_sheets(file_bytes: bytes):
@@ -1117,8 +1269,8 @@ def list_forecast_sheets(file_bytes: bytes):
         return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names, None
     except Exception as e:
         return [], str(e)
-
-
+ 
+ 
 @st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
 def load_forecast_workbook(file_bytes: bytes, sheet_name: str):
     """Returns (df, error_message)."""
@@ -1128,17 +1280,17 @@ def load_forecast_workbook(file_bytes: bytes, sheet_name: str):
         return fdf, None
     except Exception as e:
         return None, str(e)
-
-
+ 
+ 
 with tab_forecast:
     st.subheader("Pole Position")
-
+ 
     forecast_upload = st.file_uploader(
         "Upload poles forecast workbook (.xlsx)",
         type=["xlsx"],
         key="forecast_file_uploader",
     )
-
+ 
     if forecast_upload is None:
         st.info(
             "Upload the workbook with columns: District, Project ID, Project, "
@@ -1150,7 +1302,7 @@ with tab_forecast:
         if sheet_err:
             st.error(f"Couldn't open that workbook.\n\n**Details:** {sheet_err}")
             sheet_names = []
-
+ 
         if not sheet_names:
             pass  # error already shown above - nothing more to render in this tab
         else:
@@ -1162,22 +1314,22 @@ with tab_forecast:
             if fdf_err:
                 st.error(f"Couldn't read sheet '{sheet_choice}'.\n\n**Details:** {fdf_err}")
                 fdf = None
-
+ 
             if fdf is None:
                 pass  # error already shown above
             else:
                 with st.expander("Detected columns (click to view)"):
                     st.write(list(fdf.columns))
-
+ 
                 def fguess(*candidates):
                     lower_map = {c.lower(): c for c in fdf.columns}
                     for cand in candidates:
                         if cand.lower() in lower_map:
                             return lower_map[cand.lower()]
                     return None
-
+ 
                 fcol_options = ["(none)"] + list(fdf.columns)
-
+ 
                 with st.expander("⚙️ Column mapping", expanded=False):
                     def fpick(label, default_col, key):
                         idx = fcol_options.index(default_col) if default_col in fcol_options else 0
@@ -1185,7 +1337,7 @@ with tab_forecast:
                             st.warning(f"Couldn't guess a column for **{label}** - pick one.")
                         val = st.selectbox(label, fcol_options, index=idx, key=key)
                         return None if val == "(none)" else val
-
+ 
                     f_cols = {
                         "district": fpick("District", fguess("District"), "fc_district"),
                         "pid": fpick("Project ID", fguess("Project ID", "PID"), "fc_pid"),
@@ -1200,7 +1352,7 @@ with tab_forecast:
                         "disposed": fpick("Poles Disposed", fguess("Poles Disposed", "Poles disposed"), "fc_disposed"),
                         "start_date": fpick("Start Date", fguess("Start Date", "StartDate", "Start"), "fc_start_date"),
                     }
-
+ 
                 required = ["project", "circuit", "pid", "forecast", "disposed"]
                 missing = [k for k in required if f_cols[k] is None]
                 if missing:
@@ -1227,7 +1379,7 @@ with tab_forecast:
                         + plot_df["Circuit"].astype(str) + " — PID "
                         + plot_df["PID"].astype(str)
                     )
-
+ 
                     fc1, fc2, fc3 = st.columns(3)
                     with fc1:
                         forecast_districts = (
@@ -1248,14 +1400,14 @@ with tab_forecast:
                             )
                             if "Year" in plot_df.columns else []
                         )
-
+ 
                     if forecast_districts:
                         plot_df = plot_df[plot_df["District"].isin(forecast_districts)]
                     if forecast_voltages:
                         plot_df = plot_df[plot_df["Voltage"].isin(forecast_voltages)]
                     if forecast_years:
                         plot_df = plot_df[plot_df["Year"].isin(forecast_years)]
-
+ 
                     total_forecast = plot_df["Forecast"].sum()
                     total_disposed = plot_df["Disposed"].sum()
                     show_total_banner(
@@ -1263,12 +1415,12 @@ with tab_forecast:
                         f"{total_disposed:,.0f} / {total_forecast:,.0f}"
                         + (f"  ({total_disposed / total_forecast:.0%})" if total_forecast else ""),
                     )
-
+ 
                     if plot_df.empty:
                         st.caption("No rows to chart for the current filters.")
                     else:
                         plot_df = plot_df.sort_values("Forecast", ascending=True)
-
+ 
                         fig = go.Figure()
                         fig.add_trace(go.Bar(
                             y=plot_df["Label"], x=plot_df["Disposed"], orientation="h",
@@ -1302,23 +1454,23 @@ with tab_forecast:
                         )
                         st.plotly_chart(fig, use_container_width=True)
                         st.caption(f"{len(plot_df):,} project/circuit rows shown")
-
-
+ 
+ 
 with tab_totals:
     GBP_COLUMN_CONFIG = lambda col_name: {col_name: st.column_config.NumberColumn(col_name, format="£%.2f")}
-
+ 
     total_val = pd.to_numeric(f[cols["total_col"]], errors="coerce").sum() if cols["total_col"] in f.columns else None
     orig_val = pd.to_numeric(f[cols["orig_col"]], errors="coerce").sum() if cols["orig_col"] in f.columns else None
-
+ 
     if total_val is not None:
         show_total_banner("Total value (£)", f"£{total_val:,.2f}")
-
+ 
     c1, c2 = st.columns(2)
     if total_val is not None:
         c1.metric("Total value", f"£{total_val:,.2f}")
     if total_val is not None and orig_val is not None:
         c2.metric("Difference vs original", f"£{total_val - orig_val:,.2f}")
-
+ 
     if total_val is not None and project_col in f.columns:
         st.divider()
         st.subheader("Total value by Project")
@@ -1330,7 +1482,7 @@ with tab_totals:
             .sort_values("Total value (£)", ascending=False)
         )
         st.caption(f"{len(by_project_total):,} projects under the current filters")
-
+ 
         fig_proj = px.bar(
             by_project_total.sort_values("Total value (£)", ascending=True),
             x="Total value (£)", y="Project", orientation="h", text="Total value (£)",
@@ -1338,16 +1490,16 @@ with tab_totals:
         fig_proj.update_traces(marker_color="#2563eb", texttemplate="£%{text:,.0f}")
         fig_proj.update_layout(height=max(360, 32 * len(by_project_total)), margin=dict(l=10, r=10, t=10, b=10))
         st.plotly_chart(fig_proj, use_container_width=True)
-
+ 
         st.dataframe(
             by_project_total, height=320, use_container_width=True, hide_index=True,
             column_config=GBP_COLUMN_CONFIG("Total value (£)"),
         )
-
+ 
     if total_val is not None and orig_val is not None:
         f["_row_variance"] = pd.to_numeric(f[cols["total_col"]], errors="coerce") - pd.to_numeric(f[cols["orig_col"]], errors="coerce")
         variance_rows = f[f["_row_variance"] != 0]
-
+ 
         st.subheader("Jobs where total ≠ original")
         variance_table = pd.DataFrame({
             "District": variance_rows[district_col],
@@ -1361,7 +1513,7 @@ with tab_totals:
             height=320, use_container_width=True, hide_index=True,
             column_config=GBP_COLUMN_CONFIG("Difference (£)"),
         )
-
+ 
         st.subheader("Difference by Job")
         by_job = (
             variance_rows.assign(Job=variance_rows["_job_clean"])
@@ -1374,7 +1526,7 @@ with tab_totals:
             by_job, height=280, use_container_width=True, hide_index=True,
             column_config=GBP_COLUMN_CONFIG("Difference (£)"),
         )
-
+ 
         st.subheader("Difference by Project")
         if project_col in variance_rows.columns:
             by_project = (
