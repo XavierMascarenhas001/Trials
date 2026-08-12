@@ -415,8 +415,16 @@ def normalize_item(x):
  
 def normalize_item_series(s: pd.Series) -> pd.Series:
     """Vectorized equivalent of normalize_item() for a whole column -
-    pandas' .str methods instead of a Python function call per row."""
-    out = s.where(s.notna(), "").astype(str)
+    pandas' .str methods instead of a Python function call per row.
+ 
+    .astype(object) forces plain Python string objects instead of pandas'
+    pyarrow-backed string dtype (the default when pyarrow is installed on
+    newer pandas). That matters here: pyarrow's regex engine (RE2) doesn't
+    support \\uXXXX escapes the way Python's re module does, so the same
+    pattern that works locally can throw pyarrow.lib.ArrowInvalid on an
+    environment with a newer pandas/pyarrow combo. Forcing object dtype
+    keeps every .str.replace(regex=True) call on Python's re engine."""
+    out = s.where(s.notna(), "").astype(str).astype(object)
     out = out.str.replace(r"[\u200b\u200e\u200f\xa0]", "", regex=True)
     out = out.str.strip().str.upper()
     return out.str.replace(r"\s+", " ", regex=True)
@@ -433,8 +441,9 @@ def normalize_pole(p):
  
  
 def normalize_pole_series(s: pd.Series) -> pd.Series:
-    """Vectorized equivalent of normalize_pole() for a whole column."""
-    out = s.where(s.notna(), "").astype(str)
+    """Vectorized equivalent of normalize_pole() for a whole column.
+    See normalize_item_series() for why .astype(object) is here."""
+    out = s.where(s.notna(), "").astype(str).astype(object)
     out = out.str.replace(r"[\u200b\u200e\u200f\xa0]", "", regex=True)
     out = out.str.strip().str.upper()
     return out.str.replace(r"\s+", "", regex=True)
@@ -461,8 +470,10 @@ def clean_job_series(s: pd.Series) -> pd.Series:
     """Vectorized equivalent of clean_job() for a whole column. Same
     substitutions, same order (GSP removed before SP so a GSP code's 'SP'
     tail is never re-matched), just done with pandas .str.replace across
-    the whole column instead of a Python re.sub() call per row."""
-    out = s.where(s.notna(), "").astype(str).str.strip()
+    the whole column instead of a Python re.sub() call per row.
+    See normalize_item_series() for why .astype(object) is here - this
+    function's \\u2013 (en dash) pattern has the exact same RE2 issue."""
+    out = s.where(s.notna(), "").astype(str).astype(object).str.strip()
     out = out.str.replace(r'^[A-Za-z]\s*-\s*', '', regex=True)
     out = out.str.replace(r'(?i)map.*$', '', regex=True)
     out = out.str.replace(r'(?i)\bGSP\d+\b', '', regex=True)
