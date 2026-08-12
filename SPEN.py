@@ -23,7 +23,7 @@ st.set_page_config(page_title="Network Job Tracker", layout="wide")
 # workbook is uploaded via a file_uploader instead of read from disk.
  
  
-@st.cache_data(show_spinner=False, max_entries=5)
+@st.cache_data(show_spinner=False, max_entries=5, ttl=1800)
 def build_calendar_events(cal_df: pd.DataFrame) -> list:
     """Vectorized FullCalendar event build (zip over plain Python lists,
     no .iterrows()) - cached so re-rendering the calendar on an unrelated
@@ -89,7 +89,7 @@ def _outage_full_title(row) -> str:
     return " — ".join(p for p in parts if p) or "Outage"
  
  
-@st.cache_data(show_spinner="Building calendar workbook...", max_entries=3)
+@st.cache_data(show_spinner="Building calendar workbook...", max_entries=1, ttl=1800)
 def build_full_calendar_excel(cal_df: pd.DataFrame) -> bytes:
     """Builds a downloadable .xlsx with the outage programme in the same
     visual layout as the on-screen calendar (a month grid, Mon-Sun columns,
@@ -198,7 +198,7 @@ def build_full_calendar_excel(cal_df: pd.DataFrame) -> bytes:
     return bio.getvalue()
  
  
-@st.cache_data(show_spinner="Reading outage programme...", max_entries=3)
+@st.cache_data(show_spinner="Reading outage programme...", max_entries=2, ttl=1800)
 def load_outage_programme(file_bytes: bytes):
     """Cached on the uploaded file's bytes - re-parses only when a
     different file (or a changed version of the same file) is uploaded,
@@ -583,7 +583,7 @@ def show_total_banner(label, value_str):
     )
  
  
-@st.cache_data(show_spinner=False, max_entries=8)
+@st.cache_data(show_spinner=False, max_entries=4, ttl=1800)
 def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, pole_col) -> pd.DataFrame:
     """Work Instructions for a single date, as a table instead of a Word
     doc - same grouping the workpacks tool's generate_pole_docx() uses
@@ -622,7 +622,7 @@ def build_pole_task_table(day_df: pd.DataFrame, item_col: str, qsub_col: str, po
     return out
  
  
-@st.cache_data(show_spinner=False, max_entries=8)
+@st.cache_data(show_spinner=False, max_entries=4, ttl=1800)
 def render_pole_task_table_html(df: pd.DataFrame) -> str:
     """Renders build_pole_task_table()'s output with the Pole column
     merged (rowspan) across each pole's task rows and alternating
@@ -693,7 +693,7 @@ def render_pole_task_table_html(df: pd.DataFrame) -> str:
     )
  
  
-@st.cache_data(max_entries=3)
+@st.cache_data(max_entries=2, ttl=1800)
 def read_file(file):
     """Returns (df, error_message). Never raises - a malformed upload
     should show a clean st.error, not crash the whole app."""
@@ -708,14 +708,21 @@ def read_file(file):
         return None, str(e)
  
  
-@st.cache_data(show_spinner="Processing data...", max_entries=3)
+@st.cache_data(show_spinner="Processing data...", max_entries=2, ttl=1800)
 def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     """cols: the resolved {logical_name: real_column_name} mapping picked in the sidebar.
  
     Cached: Streamlit reruns the whole script on every filter/widget change,
     which would otherwise re-run normalize_item() over every row and rebuild
     the category lookup on every single interaction. This only recomputes
-    when the uploaded data or the column mapping actually changes."""
+    when the uploaded data or the column mapping actually changes.
+ 
+    This is the single largest object kept in memory (a full copy of the
+    uploaded file plus several new columns), so the derived text columns are
+    stored as 'category' dtype (cheap for the small set of repeating values
+    they actually contain) and the quantity columns as float32 instead of
+    the pandas default float64 - both are read-only after this point, so the
+    reduced precision/representation doesn't change any downstream logic."""
     df = df.copy()
     item_col = cols["item_col"]
     qsub_col = cols["qsub_col"]
@@ -724,7 +731,7 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
  
     # Raw (un-adjusted) quantity - mirrors what process_cv() reads directly
     # from "qsub" in the export tool, before any HV-multiplier adjustment.
-    df["_qsub_raw"] = pd.to_numeric(df[qsub_col], errors="coerce").fillna(0)
+    df["_qsub_raw"] = pd.to_numeric(df[qsub_col], errors="coerce").fillna(0).astype("float32")
  
     # HV pole recovery counts double (applied like the export tool's
     # df.loc[hv_pole_mask, col] *= HV_POLE_MULTIPLIER)
@@ -758,10 +765,16 @@ def process_data(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
     date_col = cols.get("date_col")
     df["_date"] = pd.to_datetime(df[date_col], errors="coerce") if date_col and date_col in df.columns else pd.NaT
  
+    # _item_norm has a small, heavily-repeated set of distinct values
+    # (one per unique item description) - category dtype stores each
+    # distinct string once instead of once per row.
+    df["_item_norm"] = df["_item_norm"].astype("category")
+    df["_mapped_category"] = df["_mapped_category"].astype("category")
+ 
     return df
  
  
-@st.cache_data(show_spinner=False, max_entries=5)
+@st.cache_data(show_spinner=False, max_entries=3, ttl=1800)
 def cv7_dedupe_poles(frame: pd.DataFrame) -> set:
     """Poles already covered by a CV7 erect/recover item - mirrors the
     export tool's cv7_poles = cv7_set(df, CV7_erect) | cv7_set(df, CV7_erect_H)
@@ -842,6 +855,12 @@ st.markdown(
 )
  
 st.title("⚡ Network Job Tracker Dashboard")
+ 
+with st.sidebar:
+    if st.button("🧹 Clear cached data", help="Frees memory by dropping every cached file/dataframe. You'll need to re-upload files and re-pick date/filter selections afterwards."):
+        st.cache_data.clear()
+        st.success("Cache cleared.")
+        st.rerun()
  
 uploaded = st.file_uploader("Upload your parquet or CSV file", type=["parquet", "csv"])
 if not uploaded:
@@ -1262,7 +1281,7 @@ with tab_items:
         st.dataframe(detail, height=320, use_container_width=True, hide_index=True)
  
 # ---- Poles Forecast tab ----
-@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
+@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=2, ttl=1800)
 def list_forecast_sheets(file_bytes: bytes):
     """Returns (sheet_names, error_message)."""
     try:
@@ -1271,7 +1290,7 @@ def list_forecast_sheets(file_bytes: bytes):
         return [], str(e)
  
  
-@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=3)
+@st.cache_data(show_spinner="Reading poles forecast workbook...", max_entries=2, ttl=1800)
 def load_forecast_workbook(file_bytes: bytes, sheet_name: str):
     """Returns (df, error_message)."""
     try:
